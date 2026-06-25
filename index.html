@@ -289,7 +289,6 @@
       <button class="btn btn-ghost btn-sm" onclick="printInvoice()">Print Invoice</button>
       <div class="sync-divider"></div>
       <button class="btn btn-ghost btn-sm" id="btnOdSign" onclick="odSignIn()">Sign in with Microsoft</button>
-      <button class="btn btn-ghost btn-sm" id="btnOdSave" onclick="odSave()" disabled>&#9729; Save</button>
       <button class="btn btn-ghost btn-sm" id="btnOdLoad" onclick="odLoad()" disabled>&#9729; Load</button>
     </div>
   </header>
@@ -330,10 +329,7 @@
         <input type="date" id="manualDate" />
       </label>
       <label>Time
-        <div style="display:flex;gap:4px;align-items:center">
-          <input type="time" id="manualTime" />
-          <button class="btn btn-ghost btn-sm" onclick="fillNow()" title="Set to now" style="padding:6px 8px;font-size:0.75rem;white-space:nowrap">Now</button>
-        </div>
+        <input type="time" id="manualTime" />
       </label>
       <label>Duration
         <select id="manualDuration"></select>
