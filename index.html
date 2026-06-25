@@ -651,12 +651,12 @@ function logEntry(clientId, date, time, minutes, note, location, noteText) {
   const client = state.clients.find(c => c.id === clientId);
   if (!client) return;
   state.entries.unshift({ id: uid(), clientId, clientName: client.name, rate: client.rate, date, time: time || '', minutes, note, location: location || '', noteText: noteText || '' });
-  save(); render();
+  save(); render(); odAutoSave();
 }
 
 function deleteEntry(id) {
   state.entries = state.entries.filter(e => e.id !== id);
-  save(); render();
+  save(); render(); odAutoSave();
 }
 
 function editEntry(id) {
@@ -713,7 +713,7 @@ function saveEntry(id) {
     location: document.getElementById('ed-location').value,
     noteText: document.getElementById('ed-notetext').value.trim(),
   };
-  save(); render();
+  save(); render(); odAutoSave();
 }
 
 // ── Log ────────────────────────────────────────────────
@@ -1450,6 +1450,20 @@ async function odSave() {
     if (!res.ok) throw new Error(await res.text());
     alert('Saved to OneDrive successfully.');
   } catch(e) { alert('Save failed: ' + e.message); }
+}
+
+async function odAutoSave() {
+  if (!odAccount) return;
+  try {
+    var token = await getOdToken();
+    if (!token) return;
+    var res = await fetch('https://graph.microsoft.com/v1.0/me/drive/root:/Apps/Consulting Tracker/' + OD_FILE + ':/content', {
+      method: 'PUT',
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify(state)
+    });
+    if (!res.ok) console.warn('OneDrive auto-save failed:', await res.text());
+  } catch(e) { console.warn('OneDrive auto-save error:', e.message); }
 }
 
 async function odLoad() {
