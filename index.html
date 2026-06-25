@@ -271,6 +271,14 @@
   </div>
 </div>
 
+<!-- Sign-in Gate -->
+<div id="signInGate" style="display:none;position:fixed;inset:0;background:var(--bg);z-index:9999;flex-direction:column;align-items:center;justify-content:center;gap:24px">
+  <img src="logo.png" alt="Cirrobound Solutions" style="height:80px;width:auto;margin-bottom:8px" />
+  <h1 style="font-size:1.6rem;color:var(--accent)">Consulting Tracker</h1>
+  <p style="color:var(--muted);font-size:0.95rem">Sign in with your Microsoft account to continue</p>
+  <button class="btn btn-primary" onclick="odSignIn()" style="font-size:1rem;padding:12px 32px">Sign in with Microsoft</button>
+</div>
+
 <div class="app">
 
   <header>
@@ -1386,17 +1394,19 @@ window.addEventListener('load', function() {
 
 function updateSyncUI() {
   var btnSign = document.getElementById('btnOdSign');
-  var btnSave = document.getElementById('btnOdSave');
   var btnLoad = document.getElementById('btnOdLoad');
-  if (!btnSign) return;
+  var gate = document.getElementById('signInGate');
+  var app  = document.querySelector('.app');
   if (odAccount) {
-    btnSign.textContent = 'Sign out (' + (odAccount.name || odAccount.username) + ')';
-    btnSave.disabled = false;
-    btnLoad.disabled = false;
+    if (btnSign) btnSign.textContent = 'Sign out (' + (odAccount.name || odAccount.username) + ')';
+    if (btnLoad) btnLoad.disabled = false;
+    if (gate) gate.style.display = 'none';
+    if (app)  app.style.display  = 'flex';
   } else {
-    btnSign.textContent = 'Sign in with Microsoft';
-    btnSave.disabled = true;
-    btnLoad.disabled = true;
+    if (btnSign) btnSign.textContent = 'Sign in with Microsoft';
+    if (btnLoad) btnLoad.disabled = true;
+    if (gate) gate.style.display = 'flex';
+    if (app)  app.style.display  = 'none';
   }
 }
 
