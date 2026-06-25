@@ -330,7 +330,10 @@
         <input type="date" id="manualDate" />
       </label>
       <label>Time
-        <input type="time" id="manualTime" />
+        <div style="display:flex;gap:4px;align-items:center">
+          <input type="time" id="manualTime" />
+          <button class="btn btn-ghost btn-sm" onclick="fillNow()" title="Set to now" style="padding:6px 8px;font-size:0.75rem;white-space:nowrap">Now</button>
+        </div>
       </label>
       <label>Duration
         <select id="manualDuration"></select>
@@ -629,6 +632,12 @@ function resetTimerUI() {
   document.getElementById('btnStart').disabled = false;
   document.getElementById('btnStop').disabled = true;
   document.getElementById('btnDiscard').disabled = true;
+}
+
+function fillNow() {
+  const now = new Date();
+  document.getElementById('manualDate').value = now.toISOString().slice(0, 10);
+  document.getElementById('manualTime').value = now.toTimeString().slice(0, 5);
 }
 
 // ── Manual Entry ───────────────────────────────────────
