@@ -767,7 +767,7 @@ function renderLog() {
   body.innerHTML = `
     <table>
       <thead><tr>
-        ${th('date','Date')}${th('date','Time')}<th>Client</th>${th('event','Event')}${th('location','Location')}<th>Description</th>${th('duration','Duration')}<th>Rate</th>${th('amount','Amount')}<th></th>
+        ${th('date','Date')}<th>Time</th><th>Client</th>${th('event','Event')}${th('location','Location')}<th>Description</th>${th('duration','Duration')}<th>Rate</th>${th('amount','Amount')}<th></th>
       </tr></thead>
       <tbody>
         ${entries.map(e => `
