@@ -1,0 +1,1479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Consulting Time Tracker</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.3/lib/msal-browser.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #22263a;
+      --border: #2e3350;
+      --accent: #4f8ef7;
+      --accent2: #6ee7b7;
+      --danger: #f87171;
+      --text: #e2e8f0;
+      --muted: #64748b;
+      --radius: 10px;
+    }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 24px 16px;
+    }
+
+    h1 { font-size: 1.5rem; font-weight: 700; color: var(--accent); }
+    h2 { font-size: 1rem; font-weight: 600; color: var(--text); margin-bottom: 12px; }
+
+    .app { max-width: 1400px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+
+    header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+    .subtitle { color: var(--muted); font-size: 0.85rem; }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+    }
+
+    /* ── Clients ── */
+    .client-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+
+    .client-chip {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--surface2);
+      border: 2px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 12px;
+      cursor: pointer;
+      transition: border-color .15s, background .15s;
+      font-size: 0.9rem;
+    }
+    .client-chip.active { border-color: var(--accent); background: #1e2d50; }
+    .client-chip .rate { color: var(--accent2); font-weight: 600; }
+    .client-chip .del {
+      color: var(--muted); font-size: 1rem; line-height: 1;
+      background: none; border: none; cursor: pointer; padding: 0 2px;
+    }
+    .client-chip .del:hover { color: var(--danger); }
+
+    .add-client-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .add-client-row input, .add-client-row select {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 7px 12px;
+      font-size: 0.9rem;
+      outline: none;
+    }
+    .add-client-row input { flex: 1; min-width: 140px; }
+    .add-client-row input:focus, .add-client-row select:focus { border-color: var(--accent); }
+
+    /* ── Timer ── */
+    .timer-section { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+    .timer-display {
+      font-size: 3.5rem; font-weight: 700; letter-spacing: 0.05em;
+      color: var(--accent); font-variant-numeric: tabular-nums;
+    }
+    .timer-client { color: var(--muted); font-size: 0.9rem; }
+    .timer-btns { display: flex; gap: 12px; }
+
+    /* ── Manual entry ── */
+    .manual-row { display: flex; gap: 8px; flex-wrap: nowrap; align-items: flex-end; overflow-x: auto; }
+    .manual-row label { display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; color: var(--muted); }
+    .manual-row input, .manual-row select {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 7px 10px;
+      font-size: 0.9rem;
+      outline: none;
+    }
+    .manual-row input:focus, .manual-row select:focus { border-color: var(--accent); }
+
+    /* ── Buttons ── */
+    .btn {
+      padding: 8px 18px; border-radius: 7px; border: none;
+      font-size: 0.9rem; font-weight: 600; cursor: pointer;
+      transition: opacity .15s, transform .1s;
+    }
+    .btn:active { transform: scale(0.97); }
+    .btn:disabled { opacity: .4; cursor: not-allowed; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-success { background: #22c55e; color: #fff; }
+    .btn-danger  { background: var(--danger); color: #fff; }
+    .btn-ghost   { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+    .btn-sm { padding: 5px 12px; font-size: 0.8rem; }
+
+    /* ── Log table ── */
+    .log-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px; }
+    .filter-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .filter-row select, .filter-row input {
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
+      color: var(--text); padding: 6px 10px; font-size: 0.85rem; outline: none;
+    }
+
+    table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    thead th {
+      text-align: left; padding: 8px 10px;
+      color: var(--muted); font-weight: 600; font-size: 0.8rem;
+      border-bottom: 1px solid var(--border);
+    }
+    tbody tr { border-bottom: 1px solid var(--border); transition: background .1s; }
+    tbody tr:hover { background: var(--surface2); }
+    tbody td { padding: 9px 10px; }
+    .badge {
+      display: inline-block; padding: 2px 8px; border-radius: 20px;
+      font-size: 0.75rem; font-weight: 600;
+      background: #1e2d50; color: var(--accent);
+    }
+    .amount { color: var(--accent2); font-weight: 600; }
+    .del-row { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 1rem; }
+    .del-row:hover { color: var(--danger); }
+
+    /* ── Summary ── */
+    .summary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+    .summary-card {
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 14px;
+    }
+    .summary-card .label { color: var(--muted); font-size: 0.78rem; margin-bottom: 4px; }
+    .summary-card .value { font-size: 1.4rem; font-weight: 700; color: var(--accent2); }
+    .summary-card .sub   { font-size: 0.82rem; color: var(--muted); margin-top: 2px; }
+
+    .empty { color: var(--muted); text-align: center; padding: 24px; font-size: 0.9rem; }
+
+    .export-row { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+    .sync-divider { width: 1px; background: var(--border); height: 24px; margin: 0 4px; }
+
+    /* ── Charts ── */
+    .charts-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 16px;
+    }
+    .chart-box {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .chart-box h3 { font-size: 0.85rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+    .chart-box canvas { max-height: 220px; }
+
+    @media (max-width: 900px) {
+      .charts-grid { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 600px) {
+      .charts-grid { grid-template-columns: 1fr; }
+      .timer-display { font-size: 2.5rem; }
+      table { font-size: 0.8rem; }
+      thead th:nth-child(3), tbody td:nth-child(3) { display: none; }
+    }
+
+    /* ── Calendar ── */
+    .cal-nav {
+      display: flex; align-items: center; gap: 12px; margin-bottom: 14px;
+    }
+    .cal-nav .cal-title {
+      font-size: 1rem; font-weight: 700; color: var(--text); min-width: 160px; text-align: center;
+    }
+    .cal-grid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 4px;
+    }
+    .cal-day-header {
+      text-align: center;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--muted);
+      padding: 4px 0;
+    }
+    .cal-day {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      min-height: 60px;
+      padding: 6px;
+      font-size: 0.8rem;
+      position: relative;
+    }
+    .cal-day.empty-day {
+      background: transparent;
+      border-color: transparent;
+    }
+    .cal-day.has-entries {
+      border-color: var(--accent);
+      background: #1a2540;
+    }
+    .cal-day.today {
+      border-color: var(--accent2);
+    }
+    .cal-day .day-num {
+      font-size: 0.8rem;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .cal-day.has-entries .day-num {
+      color: var(--text);
+    }
+    .cal-day .day-hours {
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: var(--accent);
+      margin-top: 4px;
+    }
+    .cal-day .day-amt {
+      font-size: 0.7rem;
+      color: var(--accent2);
+      margin-top: 2px;
+    }
+  </style>
+</head>
+<body>
+
+<!-- Invoice Client Picker Modal -->
+<div id="invoiceModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:999;align-items:center;justify-content:center">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:28px;min-width:300px;display:flex;flex-direction:column;gap:16px">
+    <h2 style="margin:0">Print Invoice</h2>
+    <label style="display:flex;flex-direction:column;gap:6px;font-size:0.85rem;color:var(--muted)">Client
+      <select id="invoiceClientPick" onchange="updateInvoicePreview()" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 10px;font-size:0.95rem"></select>
+    </label>
+    <label style="display:flex;flex-direction:column;gap:6px;font-size:0.85rem;color:var(--muted)">Month <span style="color:var(--muted);font-size:0.78rem">(leave blank for all time)</span>
+      <input type="month" id="invoiceMonthPick" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 10px;font-size:0.95rem" onchange="updateInvoicePreview()" />
+    </label>
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:0.9rem;display:flex;justify-content:space-between;align-items:center">
+      <span style="color:var(--muted)">Invoice #</span>
+      <strong id="invoiceNumPreview" style="color:var(--accent2)">—</strong>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:space-between;align-items:center">
+      <button class="btn btn-ghost btn-sm" onclick="resetInvoiceNumbers()" style="color:var(--danger);font-size:0.78rem">Reset Invoice #</button>
+      <div style="display:flex;gap:10px">
+        <button class="btn btn-ghost" onclick="closeInvoiceModal()">Cancel</button>
+        <button class="btn btn-ghost" onclick="emailInvoice()" style="color:var(--accent2)">&#9993; Email</button>
+        <button class="btn btn-primary" onclick="confirmInvoice()">Generate</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="app">
+
+  <header>
+    <div style="display:flex;align-items:center;gap:14px">
+      <img src="logo.png" alt="Logo" style="height:52px;width:auto" />
+      <div>
+        <h1>Consulting Tracker</h1>
+        <p class="subtitle">Billing in 15-min increments · $200/hr</p>
+      </div>
+    </div>
+    <div class="export-row">
+      <button class="btn btn-ghost btn-sm" onclick="exportCSV()">Export CSV</button>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('importCSVFile').click()">Import CSV</button>
+      <button class="btn btn-ghost btn-sm" onclick="clearAllData()" style="color:var(--danger)">Clear Data</button>
+      <input type="file" id="importCSVFile" accept=".csv" style="display:none" onchange="importCSV(event)" />
+      <button class="btn btn-ghost btn-sm" onclick="printInvoice()">Print Invoice</button>
+      <div class="sync-divider"></div>
+      <button class="btn btn-ghost btn-sm" id="btnOdSign" onclick="odSignIn()">Sign in with Microsoft</button>
+      <button class="btn btn-ghost btn-sm" id="btnOdSave" onclick="odSave()" disabled>&#9729; Save</button>
+      <button class="btn btn-ghost btn-sm" id="btnOdLoad" onclick="odLoad()" disabled>&#9729; Load</button>
+    </div>
+  </header>
+
+  <!-- Clients -->
+  <div class="card">
+    <h2>Clients</h2>
+    <div class="client-grid" id="clientGrid"></div>
+    <div class="add-client-row">
+      <input id="newClientName" placeholder="Client name (e.g. Century 3)" maxlength="40" />
+      <select id="newClientRate"></select>
+      <button class="btn btn-primary" onclick="addClient()">+ Add Client</button>
+    </div>
+  </div>
+
+  <!-- Timer -->
+  <div class="card">
+    <h2>Timer</h2>
+    <div class="timer-section">
+      <div class="timer-display" id="timerDisplay">00:00:00</div>
+      <div class="timer-client" id="timerClient">Select a client to start</div>
+      <div class="timer-btns">
+        <button class="btn btn-success" id="btnStart" onclick="startTimer()">&#9654; Start</button>
+        <button class="btn btn-danger"  id="btnStop"  onclick="stopTimer()" disabled>&#9632; Stop &amp; Log</button>
+        <button class="btn btn-ghost"   id="btnDiscard" onclick="discardTimer()" disabled>&#10005; Discard</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Manual Entry -->
+  <div class="card">
+    <h2>Manual Entry</h2>
+    <div class="manual-row">
+      <label>Client
+        <select id="manualClient"></select>
+      </label>
+      <label>Date
+        <input type="date" id="manualDate" />
+      </label>
+      <label>Time
+        <input type="time" id="manualTime" />
+      </label>
+      <label>Duration
+        <select id="manualDuration"></select>
+      </label>
+      <label>Event Type
+        <select id="manualNote">
+          <option value="Meeting">Meeting</option>
+          <option value="Meeting Prep">Meeting Prep</option>
+          <option value="Working Session">Working Session</option>
+          <option value="Training">Training</option>
+          <option value="Support Session">Support Session</option>
+        </select>
+      </label>
+      <label>Description
+        <input id="manualNoteText" placeholder="Optional description" style="width:160px" />
+      </label>
+      <label>Location
+        <select id="manualLocation">
+          <option value="Remote">Remote</option>
+          <option value="Onsite">Onsite</option>
+        </select>
+      </label>
+      <button class="btn btn-primary" onclick="addManual()" style="align-self:flex-end">+ Log</button>
+    </div>
+  </div>
+
+  <!-- Log -->
+  <div class="card">
+    <div class="log-header">
+      <h2 style="margin-bottom:0">Time Log</h2>
+      <div class="filter-row">
+        <select id="filterClient" onchange="renderLog()"><option value="">All clients</option></select>
+        <select id="filterMonth" onchange="onFilterMonthChange()"><option value="">All Months</option></select>
+      </div>
+    </div>
+    <div id="logBody"></div>
+  </div>
+
+  <!-- Summary -->
+  <div class="card">
+    <h2>Summary</h2>
+    <div class="summary-grid" id="summaryGrid"></div>
+  </div>
+
+  <!-- Charts -->
+  <div class="card" id="chartsCard">
+    <h2>Charts</h2>
+    <div class="charts-grid">
+      <div class="chart-box">
+        <h3>Hours per Month (Last 6)</h3>
+        <canvas id="chartHoursMonth"></canvas>
+      </div>
+      <div class="chart-box">
+        <h3>Revenue per Month (Last 6)</h3>
+        <canvas id="chartRevenueMonth"></canvas>
+      </div>
+      <div class="chart-box">
+        <h3>Hours by Client</h3>
+        <canvas id="chartClientDoughnut"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Calendar -->
+  <div class="card">
+    <div class="cal-nav">
+      <button class="btn btn-ghost btn-sm" onclick="calPrev()">&#9664;</button>
+      <span class="cal-title" id="calTitle"></span>
+      <button class="btn btn-ghost btn-sm" onclick="calNext()">&#9654;</button>
+    </div>
+    <div class="cal-grid" id="calGrid"></div>
+  </div>
+
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────
+let state = load();
+let timerInterval = null;
+let timerStart = null;
+let timerClientId = null;
+
+// Chart instances (kept so we can destroy before recreating)
+let chartHoursMonthInst = null;
+let chartRevenueMonthInst = null;
+let chartClientDoughnutInst = null;
+
+// Calendar state
+let calYear = new Date().getFullYear();
+let calMonth = new Date().getMonth(); // 0-based
+
+function load() {
+  try { return JSON.parse(localStorage.getItem('ct_state')) || defaultState(); }
+  catch { return defaultState(); }
+}
+function defaultState() {
+  return {
+    clients: [{ id: uid(), name: 'Century 3', rate: 200 }],
+    entries: [],
+    nextInvoiceNum: 1001
+  };
+}
+function save() {
+  try {
+    const data = JSON.stringify(state);
+    localStorage.setItem('ct_state', data);
+    localStorage.setItem('ct_state_backup', data); // keep a backup
+  } catch(e) { console.error('Save failed:', e); }
+}
+function clearAllData() {
+  const input = prompt('Type DELETE to confirm clearing all data. This cannot be undone.');
+  if (input !== 'DELETE') { if (input !== null) alert('Cancelled — you must type DELETE exactly.'); return; }
+  localStorage.removeItem('ct_state');
+  localStorage.removeItem('ct_state_backup');
+  state = defaultState();
+  save();
+  render();
+  alert('All data cleared. You can now Import CSV to restore your entries.');
+}
+function loadBackup() {
+  try {
+    const b = localStorage.getItem('ct_state_backup');
+    if (b) { state = JSON.parse(b); save(); render(); alert('Restored from backup.'); }
+    else alert('No backup found.');
+  } catch(e) { alert('Backup restore failed.'); }
+}
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+
+// ── Rate options $100–$500 in $10 steps ────────────────
+const RATES = [];
+for (let r = 100; r <= 500; r += 10) RATES.push(r);
+
+// ── Duration options 15m → 8hr in 15m steps ───────────
+const DURATIONS = [];
+for (let m = 15; m <= 480; m += 15) DURATIONS.push(m);
+function fmtDur(min) {
+  const h = Math.floor(min / 60), m = min % 60;
+  return h ? (m ? `${h}h ${m}m` : `${h}h`) : `${m}m`;
+}
+function roundTo15(ms) {
+  const min = ms / 60000;
+  return Math.max(15, Math.round(min / 15) * 15);
+}
+function calcAmount(minutes, rate) { return (minutes / 60) * rate; }
+function fmtMoney(n) { return '$' + n.toFixed(2); }
+function fmtDate(iso) {
+  const d = new Date(iso + 'T12:00:00');
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+// ── Bootstrap UI ───────────────────────────────────────
+function init() {
+  // Populate rate dropdown
+  const rateEl = document.getElementById('newClientRate');
+  RATES.forEach(r => { const o = document.createElement('option'); o.value = r; o.textContent = `$${r}/hr`; rateEl.appendChild(o); });
+  rateEl.value = 200;
+
+  // Populate duration select
+  const durEl = document.getElementById('manualDuration');
+  DURATIONS.forEach(m => { const o = document.createElement('option'); o.value = m; o.textContent = fmtDur(m); durEl.appendChild(o); });
+
+  // Default date + time = now
+  const now = new Date();
+  document.getElementById('manualDate').value = now.toISOString().slice(0, 10);
+  document.getElementById('manualTime').value = now.toTimeString().slice(0, 5);
+
+  // Month filter starts on All
+  document.getElementById('filterMonth').value = '';
+
+  render();
+  odInit();
+}
+
+function render() {
+  renderClients();
+  renderMonthFilter();
+  renderLog();
+  renderSummary();
+  renderCharts();
+  renderCalendar();
+}
+
+function onFilterMonthChange() {
+  renderLog();
+  renderSummary();
+  renderCharts();
+}
+
+function renderMonthFilter() {
+  const el = document.getElementById('filterMonth');
+  const prev = el.value;
+  // Collect unique months from all entries, sorted descending
+  const months = [...new Set(state.entries.map(e => e.date.slice(0, 7)))]
+    .sort((a, b) => b.localeCompare(a));
+  el.innerHTML = '<option value="">All Months</option>';
+  months.forEach(m => {
+    const label = new Date(m + '-02').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    el.innerHTML += `<option value="${m}" ${prev === m ? 'selected' : ''}>${label}</option>`;
+  });
+  if (prev) el.value = prev;
+}
+
+// ── Clients ────────────────────────────────────────────
+function renderClients() {
+  const grid = document.getElementById('clientGrid');
+  grid.innerHTML = '';
+  state.clients.forEach(c => {
+    const div = document.createElement('div');
+    div.className = 'client-chip' + (timerClientId === c.id ? ' active' : '');
+    div.innerHTML = `<span>${c.name}</span><span class="rate">$${c.rate}/hr</span>
+      <button class="del" title="Delete client" onclick="deleteClient('${c.id}')">×</button>`;
+    div.addEventListener('click', e => { if (!e.target.classList.contains('del')) selectClient(c.id); });
+    grid.appendChild(div);
+  });
+
+  // Sync manual + filter dropdowns
+  ['manualClient', 'filterClient'].forEach(id => {
+    const el = document.getElementById(id);
+    const prev = el.value;
+    el.innerHTML = id === 'filterClient' ? '<option value="">All clients</option>' : '';
+    state.clients.forEach(c => {
+      const o = document.createElement('option'); o.value = c.id; o.textContent = c.name; el.appendChild(o);
+    });
+    if (prev) el.value = prev;
+  });
+}
+
+function addClient() {
+  const name = document.getElementById('newClientName').value.trim();
+  const rate = parseInt(document.getElementById('newClientRate').value);
+  if (!name) { alert('Enter a client name.'); return; }
+  if (!rate) { alert('Select a rate.'); return; }
+  state.clients.push({ id: uid(), name, rate });
+  document.getElementById('newClientName').value = '';
+  save(); render();
+}
+
+function deleteClient(id) {
+  if (!confirm('Delete this client? Their logged entries will remain.')) return;
+  state.clients = state.clients.filter(c => c.id !== id);
+  if (timerClientId === id) discardTimer();
+  save(); render();
+}
+
+function selectClient(id) {
+  if (timerInterval) return; // don't switch while running
+  timerClientId = id;
+  const c = state.clients.find(c => c.id === id);
+  document.getElementById('timerClient').textContent = c ? `Billing to: ${c.name} @ $${c.rate}/hr` : 'Select a client';
+  renderClients();
+}
+
+// ── Timer ──────────────────────────────────────────────
+function startTimer() {
+  if (!timerClientId) { alert('Select a client first.'); return; }
+  timerStart = Date.now();
+  timerInterval = setInterval(tickTimer, 500);
+  document.getElementById('btnStart').disabled = true;
+  document.getElementById('btnStop').disabled = false;
+  document.getElementById('btnDiscard').disabled = false;
+}
+
+function tickTimer() {
+  const elapsed = Date.now() - timerStart;
+  const s = Math.floor(elapsed / 1000);
+  const hh = String(Math.floor(s / 3600)).padStart(2, '0');
+  const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
+  const ss = String(s % 60).padStart(2, '0');
+  document.getElementById('timerDisplay').textContent = `${hh}:${mm}:${ss}`;
+}
+
+function stopTimer() {
+  clearInterval(timerInterval); timerInterval = null;
+  const elapsed = Date.now() - timerStart;
+  const minutes = roundTo15(elapsed);
+  const note = prompt(`Rounded to ${fmtDur(minutes)}. Add a note (optional):`);
+  if (note === null) { resumeTimer(); return; } // cancelled
+  const now = new Date();
+  logEntry(timerClientId, now.toISOString().slice(0,10), now.toTimeString().slice(0,5), minutes, note || '');
+  resetTimerUI();
+}
+
+function resumeTimer() {
+  timerInterval = setInterval(tickTimer, 500);
+}
+
+function discardTimer() {
+  if (!confirm('Discard this timer?')) return;
+  clearInterval(timerInterval); timerInterval = null;
+  resetTimerUI();
+}
+
+function resetTimerUI() {
+  timerStart = null;
+  document.getElementById('timerDisplay').textContent = '00:00:00';
+  document.getElementById('btnStart').disabled = false;
+  document.getElementById('btnStop').disabled = true;
+  document.getElementById('btnDiscard').disabled = true;
+}
+
+// ── Manual Entry ───────────────────────────────────────
+function addManual() {
+  const clientId = document.getElementById('manualClient').value;
+  const date     = document.getElementById('manualDate').value;
+  const time     = document.getElementById('manualTime').value;
+  const minutes  = parseInt(document.getElementById('manualDuration').value);
+  const note     = document.getElementById('manualNote').value;
+  const location = document.getElementById('manualLocation').value;
+  const noteText = document.getElementById('manualNoteText').value.trim();
+  if (!clientId) { alert('Select a client.'); return; }
+  if (!date)     { alert('Pick a date.'); return; }
+  logEntry(clientId, date, time, minutes, note, location, noteText);
+  document.getElementById('manualNoteText').value = '';
+
+}
+
+function logEntry(clientId, date, time, minutes, note, location, noteText) {
+  const client = state.clients.find(c => c.id === clientId);
+  if (!client) return;
+  state.entries.unshift({ id: uid(), clientId, clientName: client.name, rate: client.rate, date, time: time || '', minutes, note, location: location || '', noteText: noteText || '' });
+  save(); render();
+}
+
+function deleteEntry(id) {
+  state.entries = state.entries.filter(e => e.id !== id);
+  save(); render();
+}
+
+function editEntry(id) {
+  const tr = document.querySelector(`tr[data-id="${id}"]`);
+  const e = state.entries.find(e => e.id === id);
+  if (!e || !tr) return;
+
+  const clientOptions = state.clients.map(c =>
+    `<option value="${c.id}" ${c.id === e.clientId ? 'selected' : ''}>${c.name} ($${c.rate}/hr)</option>`
+  ).join('');
+
+  const durOptions = DURATIONS.map(m =>
+    `<option value="${m}" ${m === e.minutes ? 'selected' : ''}>${fmtDur(m)}</option>`
+  ).join('');
+
+  const eventOptions = ['Meeting','Meeting Prep','Working Session','Training','Support Session'].map(v =>
+    `<option value="${v}" ${e.note === v ? 'selected' : ''}>${v}</option>`
+  ).join('');
+
+  const s = 'background:var(--surface2);border:1px solid var(--border);border-radius:5px;color:var(--text);padding:4px 6px;font-size:0.82rem';
+
+  tr.innerHTML = `
+    <td><input type="date" value="${e.date}" id="ed-date" style="${s};width:120px"></td>
+    <td><input type="time" value="${e.time||''}" id="ed-time" style="${s};width:95px"></td>
+    <td><select id="ed-client" style="${s}">${clientOptions}</select></td>
+    <td><select id="ed-note" style="${s}">${eventOptions}</select></td>
+    <td><select id="ed-location" style="${s}">
+      <option value="Remote" ${e.location==='Remote'?'selected':''}>Remote</option>
+      <option value="Onsite" ${e.location==='Onsite'?'selected':''}>Onsite</option>
+    </select></td>
+    <td><input type="text" value="${e.noteText||''}" id="ed-notetext" placeholder="Description" style="${s};width:130px"></td>
+    <td><select id="ed-dur" style="${s}">${durOptions}</select></td>
+    <td colspan="2"></td>
+    <td style="display:flex;gap:6px;padding:6px 10px">
+      <button class="btn btn-primary btn-sm" onclick="saveEntry('${id}')">Save</button>
+      <button class="btn btn-ghost btn-sm" onclick="renderLog()">Cancel</button>
+    </td>`;
+}
+
+function saveEntry(id) {
+  const idx = state.entries.findIndex(e => e.id === id);
+  if (idx === -1) return;
+  const clientId = document.getElementById('ed-client').value;
+  const client = state.clients.find(c => c.id === clientId);
+  state.entries[idx] = {
+    ...state.entries[idx],
+    date: document.getElementById('ed-date').value,
+    time: document.getElementById('ed-time').value,
+    clientId,
+    clientName: client ? client.name : state.entries[idx].clientName,
+    rate: client ? client.rate : state.entries[idx].rate,
+    minutes: parseInt(document.getElementById('ed-dur').value),
+    note: document.getElementById('ed-note').value,
+    location: document.getElementById('ed-location').value,
+    noteText: document.getElementById('ed-notetext').value.trim(),
+  };
+  save(); render();
+}
+
+// ── Log ────────────────────────────────────────────────
+let logSortCol = 'date';
+let logSortDir = 'desc'; // newest first by default
+
+function sortLog(col) {
+  if (logSortCol === col) { logSortDir = logSortDir === 'asc' ? 'desc' : 'asc'; }
+  else { logSortCol = col; logSortDir = col === 'date' ? 'desc' : 'asc'; }
+  renderLog();
+}
+
+function sortIcon(col) {
+  if (logSortCol !== col) return '<span style="color:var(--border);margin-left:4px">⇅</span>';
+  return logSortDir === 'asc'
+    ? '<span style="color:var(--accent);margin-left:4px">▲</span>'
+    : '<span style="color:var(--accent);margin-left:4px">▼</span>';
+}
+
+function renderLog() {
+  const filterClient = document.getElementById('filterClient').value;
+  const filterMonth  = document.getElementById('filterMonth').value;
+
+  let entries = state.entries;
+  if (filterClient) entries = entries.filter(e => e.clientId === filterClient);
+  if (filterMonth)  entries = entries.filter(e => e.date.startsWith(filterMonth));
+
+  // Sort
+  entries = [...entries].sort((a, b) => {
+    let va, vb;
+    switch (logSortCol) {
+      case 'date':     va = a.date + (a.time||''); vb = b.date + (b.time||''); break;
+      case 'client':   va = a.clientName; vb = b.clientName; break;
+      case 'event':    va = a.note||''; vb = b.note||''; break;
+      case 'location': va = a.location||''; vb = b.location||''; break;
+      case 'duration': va = a.minutes; vb = b.minutes; break;
+      case 'amount':   va = calcAmount(a.minutes, a.rate); vb = calcAmount(b.minutes, b.rate); break;
+      default:         va = a.date; vb = b.date;
+    }
+    if (va < vb) return logSortDir === 'asc' ? -1 : 1;
+    if (va > vb) return logSortDir === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  const body = document.getElementById('logBody');
+  if (!entries.length) { body.innerHTML = '<p class="empty">No entries yet.</p>'; return; }
+
+  const th = (col, label) =>
+    `<th style="cursor:pointer;user-select:none;white-space:nowrap" onclick="sortLog('${col}')">${label}${sortIcon(col)}</th>`;
+
+  body.innerHTML = `
+    <table>
+      <thead><tr>
+        ${th('date','Date')}${th('date','Time')}<th>Client</th>${th('event','Event')}${th('location','Location')}<th>Description</th>${th('duration','Duration')}<th>Rate</th>${th('amount','Amount')}<th></th>
+      </tr></thead>
+      <tbody>
+        ${entries.map(e => `
+          <tr data-id="${e.id}">
+            <td>${fmtDate(e.date)}</td>
+            <td>${e.time || '<span style="color:var(--muted)">—</span>'}</td>
+            <td><span class="badge">${e.clientName}</span></td>
+            <td>${e.note || '<span style="color:var(--muted)">—</span>'}</td>
+            <td>${e.location || '<span style="color:var(--muted)">—</span>'}</td>
+            <td>${e.noteText || '<span style="color:var(--muted)">—</span>'}</td>
+            <td>${fmtDur(e.minutes)}</td>
+            <td>$${e.rate}/hr</td>
+            <td class="amount">${fmtMoney(calcAmount(e.minutes, e.rate))}</td>
+            <td style="display:flex;gap:4px">
+              <button class="del-row" onclick="editEntry('${e.id}')" title="Edit" style="color:var(--accent)">✎</button>
+              <button class="del-row" onclick="deleteEntry('${e.id}')" title="Delete">×</button>
+            </td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+// ── Summary ────────────────────────────────────────────
+function renderSummary() {
+  const filterMonth = document.getElementById('filterMonth').value;
+  const entries = filterMonth ? state.entries.filter(e => e.date.startsWith(filterMonth)) : state.entries;
+
+  const totalMin = entries.reduce((s, e) => s + e.minutes, 0);
+  const totalAmt = entries.reduce((s, e) => s + calcAmount(e.minutes, e.rate), 0);
+
+  const byClient = {};
+  entries.forEach(e => {
+    if (!byClient[e.clientId]) byClient[e.clientId] = { name: e.clientName, min: 0, amt: 0 };
+    byClient[e.clientId].min += e.minutes;
+    byClient[e.clientId].amt += calcAmount(e.minutes, e.rate);
+  });
+
+  const grid = document.getElementById('summaryGrid');
+  grid.innerHTML = `
+    <div class="summary-card">
+      <div class="label">Total Billed</div>
+      <div class="value">${fmtMoney(totalAmt)}</div>
+      <div class="sub">${fmtDur(totalMin)} logged</div>
+    </div>
+    ${Object.values(byClient).map(c => `
+      <div class="summary-card">
+        <div class="label">${c.name}</div>
+        <div class="value">${fmtMoney(c.amt)}</div>
+        <div class="sub">${fmtDur(c.min)}</div>
+      </div>`).join('')}`;
+}
+
+// ── Charts ─────────────────────────────────────────────
+function getLast6Months() {
+  const months = [];
+  const now = new Date();
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    months.push(d.toISOString().slice(0, 7)); // "YYYY-MM"
+  }
+  return months;
+}
+
+function renderCharts() {
+  const filterMonth = document.getElementById('filterMonth').value;
+
+  // Determine the 6-month window: if a filter is active, center around that month
+  let last6;
+  if (filterMonth) {
+    const [fy, fm] = filterMonth.split('-').map(Number);
+    last6 = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(fy, fm - 1 - i, 1);
+      last6.push(d.toISOString().slice(0, 7));
+    }
+  } else {
+    last6 = getLast6Months();
+  }
+
+  const labels = last6.map(m => {
+    const d = new Date(m + '-02');
+    return d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+  });
+
+  // Aggregate hours and revenue by month
+  const hoursData = last6.map(m => {
+    const mins = state.entries
+      .filter(e => e.date.startsWith(m))
+      .reduce((s, e) => s + e.minutes, 0);
+    return +(mins / 60).toFixed(2);
+  });
+
+  const revenueData = last6.map(m => {
+    return +state.entries
+      .filter(e => e.date.startsWith(m))
+      .reduce((s, e) => s + calcAmount(e.minutes, e.rate), 0)
+      .toFixed(2);
+  });
+
+  // Client doughnut — use filtered entries if a month filter is active
+  const filteredEntries = filterMonth
+    ? state.entries.filter(e => e.date.startsWith(filterMonth))
+    : state.entries;
+
+  const clientHours = {};
+  filteredEntries.forEach(e => {
+    clientHours[e.clientName] = (clientHours[e.clientName] || 0) + e.minutes / 60;
+  });
+  const clientNames = Object.keys(clientHours);
+  const clientVals  = clientNames.map(n => +clientHours[n].toFixed(2));
+
+  const PALETTE = [
+    '#4f8ef7','#6ee7b7','#f87171','#fbbf24','#a78bfa',
+    '#38bdf8','#34d399','#fb923c','#e879f9','#facc15'
+  ];
+
+  const chartDefaults = {
+    responsive: true,
+    maintainAspectRatio: true,
+    plugins: {
+      legend: { labels: { color: '#e2e8f0', font: { size: 11 } } },
+      tooltip: { callbacks: {} }
+    }
+  };
+
+  // ── Hours bar chart ──
+  if (chartHoursMonthInst) { chartHoursMonthInst.destroy(); chartHoursMonthInst = null; }
+  const ctxH = document.getElementById('chartHoursMonth').getContext('2d');
+  chartHoursMonthInst = new Chart(ctxH, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Hours',
+        data: hoursData,
+        backgroundColor: '#4f8ef7aa',
+        borderColor: '#4f8ef7',
+        borderWidth: 2,
+        borderRadius: 4,
+      }]
+    },
+    options: {
+      ...chartDefaults,
+      scales: {
+        x: { ticks: { color: '#64748b' }, grid: { color: '#2e3350' } },
+        y: { ticks: { color: '#64748b' }, grid: { color: '#2e3350' }, beginAtZero: true }
+      },
+      plugins: { ...chartDefaults.plugins, legend: { display: false } }
+    }
+  });
+
+  // ── Revenue bar chart ──
+  if (chartRevenueMonthInst) { chartRevenueMonthInst.destroy(); chartRevenueMonthInst = null; }
+  const ctxR = document.getElementById('chartRevenueMonth').getContext('2d');
+  chartRevenueMonthInst = new Chart(ctxR, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Revenue ($)',
+        data: revenueData,
+        backgroundColor: '#6ee7b7aa',
+        borderColor: '#6ee7b7',
+        borderWidth: 2,
+        borderRadius: 4,
+      }]
+    },
+    options: {
+      ...chartDefaults,
+      scales: {
+        x: { ticks: { color: '#64748b' }, grid: { color: '#2e3350' } },
+        y: {
+          ticks: {
+            color: '#64748b',
+            callback: v => '$' + v.toLocaleString()
+          },
+          grid: { color: '#2e3350' },
+          beginAtZero: true
+        }
+      },
+      plugins: { ...chartDefaults.plugins, legend: { display: false } }
+    }
+  });
+
+  // ── Client doughnut ──
+  if (chartClientDoughnutInst) { chartClientDoughnutInst.destroy(); chartClientDoughnutInst = null; }
+  const ctxD = document.getElementById('chartClientDoughnut').getContext('2d');
+  if (clientNames.length === 0) {
+    // Draw empty state message
+    ctxD.clearRect(0, 0, ctxD.canvas.width, ctxD.canvas.height);
+    ctxD.fillStyle = '#64748b';
+    ctxD.font = '14px Segoe UI, system-ui, sans-serif';
+    ctxD.textAlign = 'center';
+    ctxD.fillText('No data', ctxD.canvas.width / 2, ctxD.canvas.height / 2);
+  } else {
+    chartClientDoughnutInst = new Chart(ctxD, {
+      type: 'doughnut',
+      data: {
+        labels: clientNames,
+        datasets: [{
+          data: clientVals,
+          backgroundColor: PALETTE.slice(0, clientNames.length).map(c => c + 'cc'),
+          borderColor: PALETTE.slice(0, clientNames.length),
+          borderWidth: 2,
+          hoverOffset: 6,
+        }]
+      },
+      options: {
+        ...chartDefaults,
+        cutout: '60%',
+        plugins: {
+          legend: {
+            position: 'bottom',
+            labels: { color: '#e2e8f0', font: { size: 11 }, padding: 10 }
+          },
+          tooltip: {
+            callbacks: {
+              label: ctx => ` ${ctx.label}: ${ctx.parsed.toFixed(1)}h`
+            }
+          }
+        }
+      }
+    });
+  }
+}
+
+// ── Calendar ───────────────────────────────────────────
+function renderCalendar() {
+  const title = document.getElementById('calTitle');
+  const grid  = document.getElementById('calGrid');
+
+  const monthLabel = new Date(calYear, calMonth, 1)
+    .toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  title.textContent = monthLabel;
+
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const ym = `${calYear}-${String(calMonth + 1).padStart(2, '0')}`;
+
+  // Build a map: date string -> { totalMin, totalAmt }
+  const dayMap = {};
+  state.entries
+    .filter(e => e.date.startsWith(ym))
+    .forEach(e => {
+      if (!dayMap[e.date]) dayMap[e.date] = { min: 0, amt: 0 };
+      dayMap[e.date].min += e.minutes;
+      dayMap[e.date].amt += calcAmount(e.minutes, e.rate);
+    });
+
+  const firstDow = new Date(calYear, calMonth, 1).getDay(); // 0=Sun
+  const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+
+  let html = '';
+  // Day-of-week headers
+  ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach(d => {
+    html += `<div class="cal-day-header">${d}</div>`;
+  });
+
+  // Empty leading cells
+  for (let i = 0; i < firstDow; i++) {
+    html += `<div class="cal-day empty-day"></div>`;
+  }
+
+  // Day cells
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${ym}-${String(d).padStart(2, '0')}`;
+    const data = dayMap[dateStr];
+    const isToday = dateStr === todayStr;
+    const hasEntries = !!data;
+
+    let cls = 'cal-day';
+    if (hasEntries) cls += ' has-entries';
+    if (isToday) cls += ' today';
+
+    let inner = `<div class="day-num">${d}</div>`;
+    if (hasEntries) {
+      const hrs = (data.min / 60).toFixed(1);
+      inner += `<div class="day-hours">${hrs}h</div>`;
+      inner += `<div class="day-amt">${fmtMoney(data.amt)}</div>`;
+    }
+    html += `<div class="${cls}">${inner}</div>`;
+  }
+
+  grid.innerHTML = html;
+}
+
+function calPrev() {
+  calMonth--;
+  if (calMonth < 0) { calMonth = 11; calYear--; }
+  renderCalendar();
+}
+
+function calNext() {
+  calMonth++;
+  if (calMonth > 11) { calMonth = 0; calYear++; }
+  renderCalendar();
+}
+
+// ── Export CSV ─────────────────────────────────────────
+function exportCSV() {
+  const filterMonth = document.getElementById('filterMonth').value;
+  let entries = filterMonth ? state.entries.filter(e => e.date.startsWith(filterMonth)) : state.entries;
+
+  const rows = [['Date','Time','Client','Event Type','Location','Description','Duration (min)','Rate ($/hr)','Amount ($)']];
+  entries.forEach(e => rows.push([
+    e.date, e.time || '', e.clientName, e.note || '', e.location || '', e.noteText || '',
+    e.minutes, e.rate, calcAmount(e.minutes, e.rate).toFixed(2)
+  ]));
+
+  const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = `consulting-${filterMonth || 'all'}.csv`;
+  a.click();
+}
+
+// ── Import CSV ─────────────────────────────────────────
+function importCSV(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const lines = e.target.result.split('\n').map(l => l.trim()).filter(l => l);
+    const header = lines[0].split(',').map(h => h.replace(/"/g,'').trim());
+    const dateIdx     = header.indexOf('Date');
+    const timeIdx     = header.indexOf('Time');
+    const clientIdx   = header.indexOf('Client');
+    const noteIdx     = header.indexOf('Event Type');
+    const locationIdx = header.indexOf('Location');
+    const noteTextIdx = header.indexOf('Description');
+    const durIdx      = header.indexOf('Duration (min)');
+    const rateIdx     = header.indexOf('Rate ($/hr)');
+
+    if (dateIdx === -1 || clientIdx === -1 || durIdx === -1) {
+      alert('CSV format not recognized. Please use a CSV exported from this app.');
+      return;
+    }
+
+    let imported = 0, skipped = 0;
+    for (let i = 1; i < lines.length; i++) {
+      const cols = lines[i].match(/(".*?"|[^,]+)(?=,|$)/g);
+      if (!cols) continue;
+      const clean = cols.map(c => c.replace(/^"|"$/g,'').replace(/""/g,'"').trim());
+      const date       = clean[dateIdx];
+      const time       = timeIdx > -1 ? clean[timeIdx] : '';
+      const clientName = clean[clientIdx];
+      const note       = noteIdx > -1 ? clean[noteIdx] : '';
+      const location   = locationIdx > -1 ? clean[locationIdx] : '';
+      const noteText   = noteTextIdx > -1 ? clean[noteTextIdx] : '';
+      const minutes    = parseInt(clean[durIdx]);
+      const rate       = rateIdx > -1 ? parseInt(clean[rateIdx]) : 200;
+
+      if (!date || !clientName || isNaN(minutes)) { skipped++; continue; }
+
+      // Find or create client
+      let client = state.clients.find(c => c.name.toLowerCase() === clientName.toLowerCase());
+      if (!client) {
+        client = { id: uid(), name: clientName, rate: rate || 200 };
+        state.clients.push(client);
+      }
+
+      // Skip exact duplicates
+      const duplicate = state.entries.some(ex => ex.date === date && ex.clientId === client.id && ex.minutes === minutes && ex.note === note);
+      if (duplicate) { skipped++; continue; }
+
+      state.entries.unshift({ id: uid(), clientId: client.id, clientName: client.name, rate: client.rate, date, time, minutes, note, location, noteText });
+      imported++;
+    }
+
+    save(); render();
+    event.target.value = '';
+    alert(`Import complete: ${imported} entries added, ${skipped} skipped (duplicates or invalid).`);
+  };
+  reader.readAsText(file);
+}
+
+// ── Print Invoice ──────────────────────────────────────
+function printInvoice() {
+  const modal = document.getElementById('invoiceModal');
+  const pick  = document.getElementById('invoiceClientPick');
+  pick.innerHTML = '';
+  state.clients.forEach(c => {
+    const o = document.createElement('option'); o.value = c.id; o.textContent = `${c.name} ($${c.rate}/hr)`; pick.appendChild(o);
+  });
+  document.getElementById('invoiceMonthPick').value = new Date().toISOString().slice(0, 7);
+  modal.style.display = 'flex';
+  updateInvoicePreview();
+}
+function updateInvoicePreview() {
+  const clientId = document.getElementById('invoiceClientPick').value;
+  const month    = document.getElementById('invoiceMonthPick').value;
+  if (!clientId) return;
+  if (!state.invoiceNumbers) state.invoiceNumbers = {};
+  if (!state.nextInvoiceNum) state.nextInvoiceNum = 1001;
+  const key = `${clientId}-${month || 'all'}`;
+  const num = state.invoiceNumbers[key] || `INV-${state.nextInvoiceNum} (new)`;
+  document.getElementById('invoiceNumPreview').textContent = num;
+}
+function closeInvoiceModal() { document.getElementById('invoiceModal').style.display = 'none'; }
+function resetInvoiceNumbers() {
+  if (!confirm('Reset invoice numbering back to INV-1001? This cannot be undone.')) return;
+  state.nextInvoiceNum = 1001;
+  state.invoiceNumbers = {};
+  save();
+  updateInvoicePreview();
+  alert('Invoice numbers reset to INV-1001.');
+}
+
+// ── Email Invoice ──────────────────────────────────────
+function emailInvoice() {
+  closeInvoiceModal();
+  const filterClient = document.getElementById('invoiceClientPick').value;
+  const filterMonth  = document.getElementById('invoiceMonthPick').value;
+  if (!filterClient) return;
+
+  // Reuse or assign invoice number
+  if (!state.nextInvoiceNum) state.nextInvoiceNum = 1001;
+  if (!state.invoiceNumbers) state.invoiceNumbers = {};
+  const invoiceKey = `${filterClient}-${filterMonth || 'all'}`;
+  if (!state.invoiceNumbers[invoiceKey]) {
+    state.invoiceNumbers[invoiceKey] = `INV-${state.nextInvoiceNum}`;
+    state.nextInvoiceNum++;
+    save();
+  }
+  const invoiceNum = state.invoiceNumbers[invoiceKey];
+
+  const client = state.clients.find(c => c.id === filterClient);
+  const clientName = client ? client.name : 'Client';
+
+  let entries = state.entries.filter(e => e.clientId === filterClient);
+  if (filterMonth) entries = entries.filter(e => e.date.startsWith(filterMonth));
+  entries = [...entries].sort((a, b) => a.date.localeCompare(b.date));
+
+  const totalMin = entries.reduce((s, e) => s + e.minutes, 0);
+  const totalAmt = entries.reduce((s, e) => s + calcAmount(e.minutes, e.rate), 0);
+
+  const monthLabel = filterMonth
+    ? new Date(filterMonth + '-02').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+    : 'All Time';
+
+  const dateGenerated = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+
+  // Build plain-text invoice body
+  const COL_W = [12, 8, 18, 12, 20, 8, 10, 10];
+  function padR(s, w) { return String(s).slice(0, w).padEnd(w); }
+
+  const headerRow = [
+    padR('Date', COL_W[0]),
+    padR('Time', COL_W[1]),
+    padR('Event', COL_W[2]),
+    padR('Location', COL_W[3]),
+    padR('Description', COL_W[4]),
+    padR('Duration', COL_W[5]),
+    padR('Rate', COL_W[6]),
+    padR('Amount', COL_W[7]),
+  ].join('  ');
+
+  const divider = '-'.repeat(headerRow.length);
+
+  const entryRows = entries.map(e => [
+    padR(fmtDate(e.date), COL_W[0]),
+    padR(e.time || '—', COL_W[1]),
+    padR(e.note || '—', COL_W[2]),
+    padR(e.location || '—', COL_W[3]),
+    padR(e.noteText || '—', COL_W[4]),
+    padR(fmtDur(e.minutes), COL_W[5]),
+    padR('$' + e.rate + '/hr', COL_W[6]),
+    padR(fmtMoney(calcAmount(e.minutes, e.rate)), COL_W[7]),
+  ].join('  ')).join('\n');
+
+  const body = [
+    'CONSULTING INVOICE',
+    '==================',
+    '',
+    `Invoice #:   ${invoiceNum}`,
+    `Client:      ${clientName}`,
+    `Period:      ${monthLabel}`,
+    `Generated:   ${dateGenerated}`,
+    '',
+    divider,
+    headerRow,
+    divider,
+    entryRows,
+    divider,
+    '',
+    `TOTAL HOURS:   ${fmtDur(totalMin)}`,
+    `TOTAL AMOUNT:  ${fmtMoney(totalAmt)}`,
+    '',
+    '--',
+    'Cirrobound Solutions',
+  ].join('\n');
+
+  const subject = encodeURIComponent(`${invoiceNum} – ${clientName} – ${monthLabel}`);
+  const bodyEnc = encodeURIComponent(body);
+  window.location.href = `mailto:?subject=${subject}&body=${bodyEnc}`;
+}
+
+function confirmInvoice() {
+  closeInvoiceModal();
+  const filterClient = document.getElementById('invoiceClientPick').value;
+  const filterMonth  = document.getElementById('invoiceMonthPick').value;
+  if (!filterClient) return;
+
+  // Reuse existing invoice number for same client+month, or assign new one
+  if (!state.nextInvoiceNum) state.nextInvoiceNum = 1001;
+  if (!state.invoiceNumbers) state.invoiceNumbers = {};
+  const invoiceKey = `${filterClient}-${filterMonth || 'all'}`;
+  if (!state.invoiceNumbers[invoiceKey]) {
+    state.invoiceNumbers[invoiceKey] = `INV-${state.nextInvoiceNum}`;
+    state.nextInvoiceNum++;
+    save();
+  }
+  const invoiceNum = state.invoiceNumbers[invoiceKey];
+
+  const client = state.clients.find(c => c.id === filterClient);
+  const clientName = client ? client.name : 'Client';
+
+  let entries = state.entries.filter(e => e.clientId === filterClient);
+  if (filterMonth) entries = entries.filter(e => e.date.startsWith(filterMonth));
+  entries = [...entries].sort((a, b) => a.date.localeCompare(b.date));
+
+  const totalMin = entries.reduce((s, e) => s + e.minutes, 0);
+  const totalAmt = entries.reduce((s, e) => s + calcAmount(e.minutes, e.rate), 0);
+
+  const monthLabel = filterMonth
+    ? new Date(filterMonth + '-02').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+    : 'All Time';
+
+  const rows = entries.map(e => `
+    <tr>
+      <td>${fmtDate(e.date)}</td>
+      <td>${e.time || '—'}</td>
+      <td>${e.note || '—'}</td>
+      <td>${e.location || '—'}</td>
+      <td>${e.noteText || '—'}</td>
+      <td>${fmtDur(e.minutes)}</td>
+      <td>$${e.rate}/hr</td>
+      <td>${fmtMoney(calcAmount(e.minutes, e.rate))}</td>
+    </tr>`).join('');
+
+  const win = window.open('', '_blank');
+  win.document.write(`<!DOCTYPE html><html><head><title>Invoice – ${clientName}</title>
+  <style>
+    body { font-family: 'Segoe UI', sans-serif; color: #111; padding: 40px; max-width: 800px; margin: 0 auto; }
+    .invoice-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 32px; border-bottom: 2px solid #111; padding-bottom: 20px; }
+    .invoice-header img { height: 70px; width: auto; }
+    .company { text-align: right; }
+    .company h2 { font-size: 1.3rem; margin: 0 0 4px; }
+    .company p { color: #555; font-size: 0.85rem; margin: 0; }
+    h1 { font-size: 1.4rem; margin: 0 0 4px; }
+    .meta { color: #555; font-size: 0.9rem; margin-bottom: 24px; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    th { text-align: left; padding: 8px 10px; border-bottom: 2px solid #111; font-weight: 600; }
+    td { padding: 8px 10px; border-bottom: 1px solid #ddd; }
+    .total-row td { border-top: 2px solid #111; border-bottom: none; font-weight: 700; font-size: 1rem; }
+    @media print { body { padding: 20px; } }
+  </style></head><body>
+  <div class="invoice-header">
+    <img src="https://mtwall2026.github.io/consulting-tracker/logo.png" alt="Cirrobound Solutions" />
+    <div class="company">
+      <h2>Cirrobound Solutions</h2>
+      <p>Consulting Invoice</p>
+    </div>
+  </div>
+  <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:6px">
+    <h1 style="margin:0">Invoice — ${clientName}</h1>
+    <span style="font-size:1rem;font-weight:700;color:#333">${invoiceNum}</span>
+  </div>
+  <p class="meta">${monthLabel} &nbsp;·&nbsp; ${fmtDur(totalMin)} logged &nbsp;·&nbsp; ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</p>
+  <table>
+    <thead><tr><th>Date</th><th>Time</th><th>Event</th><th>Location</th><th>Description</th><th>Duration</th><th>Rate</th><th>Amount</th></tr></thead>
+    <tbody>${rows}
+      <tr class="total-row">
+        <td colspan="5">Total</td>
+        <td>${fmtMoney(totalAmt)}</td>
+      </tr>
+    </tbody>
+  </table>
+  <script>window.onload = () => { window.print(); }<\/script>
+  </body></html>`);
+  win.document.close();
+}
+
+// ── OneDrive Sync ──────────────────────────────────────
+var odAccount = null;
+var msalInstance = null;
+var OD_SCOPES = ['Files.ReadWrite', 'User.Read'];
+var OD_FILE = 'consulting-tracker-data.json';
+var MSAL_CONFIG = {
+  auth: {
+    clientId: 'd7780fb3-0904-400b-9020-24ada889456d',
+    authority: 'https://login.microsoftonline.com/76dfb5b0-26d3-4b28-b7ca-654b052a863f',
+    redirectUri: 'https://mtwall2026.github.io/consulting-tracker/',
+  },
+  cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: false }
+};
+
+window.addEventListener('load', function() {
+  if (typeof msal === 'undefined') { console.warn('MSAL not loaded'); return; }
+  try {
+    msalInstance = new msal.PublicClientApplication(MSAL_CONFIG);
+    msalInstance.handleRedirectPromise().then(function(resp) {
+      if (resp && resp.account) { odAccount = resp.account; }
+      else {
+        var accounts = msalInstance.getAllAccounts();
+        if (accounts.length > 0) odAccount = accounts[0];
+      }
+      updateSyncUI();
+    }).catch(function(e) { console.error('Redirect error:', e); updateSyncUI(); });
+  } catch(e) { console.error('MSAL init error:', e); }
+});
+
+function updateSyncUI() {
+  var btnSign = document.getElementById('btnOdSign');
+  var btnSave = document.getElementById('btnOdSave');
+  var btnLoad = document.getElementById('btnOdLoad');
+  if (!btnSign) return;
+  if (odAccount) {
+    btnSign.textContent = 'Sign out (' + (odAccount.name || odAccount.username) + ')';
+    btnSave.disabled = false;
+    btnLoad.disabled = false;
+  } else {
+    btnSign.textContent = 'Sign in with Microsoft';
+    btnSave.disabled = true;
+    btnLoad.disabled = true;
+  }
+}
+
+function odInit() { /* initialization handled by window load event */ }
+
+function isMobile() {
+  return /Android|iPhone|iPad|iPod|Opera Mini|IEMobile|WPDesktop/i.test(navigator.userAgent);
+}
+
+async function odSignIn() {
+  if (!msalInstance) { alert('Sign-in not ready yet — please wait a moment and try again.'); return; }
+  if (odAccount) {
+    try {
+      if (isMobile()) { await msalInstance.logoutRedirect(); }
+      else { await msalInstance.logoutPopup(); }
+    } catch(e) {}
+    odAccount = null;
+    updateSyncUI();
+    return;
+  }
+  try {
+    if (isMobile()) {
+      await msalInstance.loginRedirect({ scopes: OD_SCOPES });
+    } else {
+      var resp = await msalInstance.loginPopup({ scopes: OD_SCOPES });
+      odAccount = resp.account;
+      updateSyncUI();
+    }
+  } catch(e) { alert('Sign in failed: ' + e.message); }
+}
+
+async function getOdToken() {
+  try {
+    var resp = await msalInstance.acquireTokenSilent({ scopes: OD_SCOPES, account: odAccount });
+    return resp.accessToken;
+  } catch(e) {
+    if (isMobile()) {
+      await msalInstance.acquireTokenRedirect({ scopes: OD_SCOPES, account: odAccount });
+      return null;
+    } else {
+      var resp2 = await msalInstance.acquireTokenPopup({ scopes: OD_SCOPES, account: odAccount });
+      return resp2.accessToken;
+    }
+  }
+}
+
+async function odSave() {
+  if (!odAccount) { alert('Please sign in first.'); return; }
+  try {
+    var token = await getOdToken();
+    var res = await fetch('https://graph.microsoft.com/v1.0/me/drive/root:/Apps/Consulting Tracker/' + OD_FILE + ':/content', {
+      method: 'PUT',
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify(state)
+    });
+    if (!res.ok) throw new Error(await res.text());
+    alert('Saved to OneDrive successfully.');
+  } catch(e) { alert('Save failed: ' + e.message); }
+}
+
+async function odLoad() {
+  if (!odAccount) { alert('Please sign in first.'); return; }
+  try {
+    var token = await getOdToken();
+    var res = await fetch('https://graph.microsoft.com/v1.0/me/drive/root:/Apps/Consulting Tracker/' + OD_FILE + ':/content', {
+      headers: { Authorization: 'Bearer ' + token }
+    });
+    if (res.status === 404) { alert('No saved data found in OneDrive.'); return; }
+    if (!res.ok) throw new Error(await res.text());
+    var loaded = await res.json();
+    if (!loaded.clients || !loaded.entries) { alert('Invalid data in OneDrive file.'); return; }
+    if (!confirm('Load ' + loaded.entries.length + ' entries and ' + loaded.clients.length + ' clients from OneDrive? This replaces current data.')) return;
+    state = loaded;
+    save();
+    render();
+    alert('Loaded from OneDrive successfully.');
+  } catch(e) { alert('Load failed: ' + e.message); }
+}
+
+init();
+</script>
+</body>
+</html>
+
+
