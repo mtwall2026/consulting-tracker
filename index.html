@@ -1388,6 +1388,7 @@ window.addEventListener('load', function() {
         if (accounts.length > 0) odAccount = accounts[0];
       }
       updateSyncUI();
+      if (odAccount) { resetLocalStateForSignIn(); odLoad(true); }
     }).catch(function(e) { console.error('Redirect error:', e); updateSyncUI(); });
   } catch(e) { console.error('MSAL init error:', e); }
 });
@@ -1412,6 +1413,23 @@ function updateSyncUI() {
 
 function odInit() { /* initialization handled by window load event */ }
 
+// Wipes local state before an auto-load so a different account signing in
+// on the same browser never sees whatever the previous account left behind
+// (also covers the case where the new account has no cloud file yet — a
+// 404 on load must not leave stale/foreign data on screen).
+function resetLocalStateForSignIn() {
+  state = defaultState();
+  save();
+  render();
+}
+
+// Every signed-in account reads/writes its own file in its own OneDrive —
+// no cross-account sharing needed, since a user always has full access to
+// their own drive automatically.
+function odGraphContentUrl() {
+  return 'https://graph.microsoft.com/v1.0/me/drive/root:/Apps/Consulting Tracker/' + OD_FILE + ':/content';
+}
+
 function isMobile() {
   return /Android|iPhone|iPad|iPod|Opera Mini|IEMobile|WPDesktop/i.test(navigator.userAgent);
 }
@@ -1434,6 +1452,8 @@ async function odSignIn() {
       var resp = await msalInstance.loginPopup({ scopes: OD_SCOPES });
       odAccount = resp.account;
       updateSyncUI();
+      resetLocalStateForSignIn();
+      odLoad(true);
     }
   } catch(e) { alert('Sign in failed: ' + e.message); }
 }
@@ -1457,7 +1477,7 @@ async function odSave() {
   if (!odAccount) { alert('Please sign in first.'); return; }
   try {
     var token = await getOdToken();
-    var res = await fetch('https://graph.microsoft.com/v1.0/me/drive/root:/Apps/Consulting Tracker/' + OD_FILE + ':/content', {
+    var res = await fetch(odGraphContentUrl(), {
       method: 'PUT',
       headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
       body: JSON.stringify(state)
@@ -1472,7 +1492,7 @@ async function odAutoSave() {
   try {
     var token = await getOdToken();
     if (!token) return;
-    var res = await fetch('https://graph.microsoft.com/v1.0/me/drive/root:/Apps/Consulting Tracker/' + OD_FILE + ':/content', {
+    var res = await fetch(odGraphContentUrl(), {
       method: 'PUT',
       headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
       body: JSON.stringify(state)
@@ -1481,23 +1501,30 @@ async function odAutoSave() {
   } catch(e) { console.warn('OneDrive auto-save error:', e.message); }
 }
 
-async function odLoad() {
-  if (!odAccount) { alert('Please sign in first.'); return; }
+// silent=true is used for the automatic post-sign-in load: no confirm
+// prompt, and a missing/absent file (new user's first sign-in) is expected,
+// not an error.
+async function odLoad(silent) {
+  if (!odAccount) { if (!silent) alert('Please sign in first.'); return; }
   try {
     var token = await getOdToken();
-    var res = await fetch('https://graph.microsoft.com/v1.0/me/drive/root:/Apps/Consulting Tracker/' + OD_FILE + ':/content', {
+    if (!token) return;
+    var res = await fetch(odGraphContentUrl(), {
       headers: { Authorization: 'Bearer ' + token }
     });
-    if (res.status === 404) { alert('No saved data found in OneDrive.'); return; }
+    if (res.status === 404) { if (!silent) alert('No saved data found in OneDrive.'); return; }
     if (!res.ok) throw new Error(await res.text());
     var loaded = await res.json();
-    if (!loaded.clients || !loaded.entries) { alert('Invalid data in OneDrive file.'); return; }
-    if (!confirm('Load ' + loaded.entries.length + ' entries and ' + loaded.clients.length + ' clients from OneDrive? This replaces current data.')) return;
+    if (!loaded.clients || !loaded.entries) { if (!silent) alert('Invalid data in OneDrive file.'); return; }
+    if (!silent && !confirm('Load ' + loaded.entries.length + ' entries and ' + loaded.clients.length + ' clients from OneDrive? This replaces current data.')) return;
     state = loaded;
     save();
     render();
-    alert('Loaded from OneDrive successfully.');
-  } catch(e) { alert('Load failed: ' + e.message); }
+    if (!silent) alert('Loaded from OneDrive successfully.');
+  } catch(e) {
+    if (!silent) alert('Load failed: ' + e.message);
+    else console.warn('OneDrive auto-load failed:', e.message);
+  }
 }
 
 init();
