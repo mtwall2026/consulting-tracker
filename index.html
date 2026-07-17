@@ -290,22 +290,35 @@
       </div>
     </div>
     <div class="export-row">
-      <button class="btn btn-ghost btn-sm" onclick="exportCSV()">Export CSV</button>
-      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('importCSVFile').click()">Import CSV</button>
-      <button class="btn btn-ghost btn-sm" onclick="clearAllData()" style="color:var(--danger)">Clear Data</button>
+      <button class="btn btn-ghost btn-sm" id="btnExportCSV" onclick="exportCSV()">Export CSV</button>
+      <button class="btn btn-ghost btn-sm" id="btnImportCSVBtn" onclick="document.getElementById('importCSVFile').click()">Import CSV</button>
+      <button class="btn btn-ghost btn-sm" id="btnClearData" onclick="clearAllData()" style="color:var(--danger)">Clear Data</button>
       <input type="file" id="importCSVFile" accept=".csv" style="display:none" onchange="importCSV(event)" />
-      <button class="btn btn-ghost btn-sm" onclick="printInvoice()">Print Invoice</button>
+      <button class="btn btn-ghost btn-sm" id="btnPrintInvoice" onclick="printInvoice()">Print Invoice</button>
+      <button class="btn btn-ghost btn-sm" id="btnShareWithManager" onclick="shareMyDataWithManager()" style="display:none">Share log with Taylor</button>
       <div class="sync-divider"></div>
       <button class="btn btn-ghost btn-sm" id="btnOdSign" onclick="odSignIn()">Sign in with Microsoft</button>
       <button class="btn btn-ghost btn-sm" id="btnOdLoad" onclick="odLoad()" disabled>&#9729; Load</button>
     </div>
   </header>
 
+  <!-- Team View (manager account only) -->
+  <div class="card" id="teamViewCard" style="display:none">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <h2 style="margin:0">Team View</h2>
+      <select id="teamViewPick" onchange="switchTeamView()" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 10px;font-size:0.9rem">
+        <option value="">My Data</option>
+      </select>
+      <button class="btn btn-ghost btn-sm" onclick="refreshTeamSharedList()">&#8635; Refresh List</button>
+      <span id="teamViewBanner" style="display:none;color:var(--accent2);font-size:0.85rem;font-weight:600">&#128065; Viewing read-only &mdash; no changes here are saved</span>
+    </div>
+  </div>
+
   <!-- Clients -->
   <div class="card">
     <h2>Clients</h2>
     <div class="client-grid" id="clientGrid"></div>
-    <div class="add-client-row">
+    <div class="add-client-row" id="addClientRow">
       <input id="newClientName" placeholder="Client name (e.g. Century 3)" maxlength="40" />
       <select id="newClientRate"></select>
       <button class="btn btn-primary" onclick="addClient()">+ Add Client</button>
@@ -313,7 +326,7 @@
   </div>
 
   <!-- Timer -->
-  <div class="card">
+  <div class="card" id="timerCard">
     <h2>Timer</h2>
     <div class="timer-section">
       <div class="timer-display" id="timerDisplay">00:00:00</div>
@@ -327,7 +340,7 @@
   </div>
 
   <!-- Manual Entry -->
-  <div class="card">
+  <div class="card" id="manualEntryCard">
     <h2>Manual Entry</h2>
     <div class="manual-row">
       <label>Client
@@ -429,6 +442,15 @@ let chartClientDoughnutInst = null;
 let calYear = new Date().getFullYear();
 let calMonth = new Date().getMonth(); // 0-based
 
+// ── Team View (manager account only) ───────────────────
+// Read-only view of a teammate's data, loaded live from their OneDrive
+// after they've shared their file. Never touches the real `state` or
+// localStorage — activeState() is what every render function reads from.
+let teamSharedItems = [];   // [{ label, driveId, itemId }]
+let teamViewActive = false;
+let teamViewState = null;
+function activeState() { return teamViewActive ? teamViewState : state; }
+
 function load() {
   try { return JSON.parse(localStorage.getItem('ct_state')) || defaultState(); }
   catch { return defaultState(); }
@@ -512,12 +534,29 @@ function init() {
 }
 
 function render() {
+  applyTeamViewVisibility();
   renderClients();
   renderMonthFilter();
   renderLog();
   renderSummary();
   renderCharts();
   renderCalendar();
+}
+
+// Hides/disables every control that mutates data while viewing a
+// teammate's read-only data, so nothing gets accidentally written to
+// the wrong account's OneDrive file.
+function applyTeamViewVisibility() {
+  var banner = document.getElementById('teamViewBanner');
+  if (banner) banner.style.display = teamViewActive ? 'inline' : 'none';
+  ['addClientRow', 'timerCard', 'manualEntryCard'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = teamViewActive ? 'none' : '';
+  });
+  ['btnImportCSVBtn', 'btnClearData', 'btnPrintInvoice'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = teamViewActive;
+  });
 }
 
 function onFilterMonthChange() {
@@ -530,7 +569,7 @@ function renderMonthFilter() {
   const el = document.getElementById('filterMonth');
   const prev = el.value;
   // Collect unique months from all entries, sorted descending
-  const months = [...new Set(state.entries.map(e => e.date.slice(0, 7)))]
+  const months = [...new Set(activeState().entries.map(e => e.date.slice(0, 7)))]
     .sort((a, b) => b.localeCompare(a));
   el.innerHTML = '<option value="">All Months</option>';
   months.forEach(m => {
@@ -544,25 +583,34 @@ function renderMonthFilter() {
 function renderClients() {
   const grid = document.getElementById('clientGrid');
   grid.innerHTML = '';
-  state.clients.forEach(c => {
+  activeState().clients.forEach(c => {
     const div = document.createElement('div');
     div.className = 'client-chip' + (timerClientId === c.id ? ' active' : '');
-    div.innerHTML = `<span>${c.name}</span><span class="rate">$${c.rate}/hr</span>
+    div.innerHTML = teamViewActive
+      ? `<span>${c.name}</span><span class="rate">$${c.rate}/hr</span>`
+      : `<span>${c.name}</span><span class="rate">$${c.rate}/hr</span>
       <button class="del" title="Delete client" onclick="deleteClient('${c.id}')">×</button>`;
-    div.addEventListener('click', e => { if (!e.target.classList.contains('del')) selectClient(c.id); });
+    if (!teamViewActive) div.addEventListener('click', e => { if (!e.target.classList.contains('del')) selectClient(c.id); });
     grid.appendChild(div);
   });
 
-  // Sync manual + filter dropdowns
-  ['manualClient', 'filterClient'].forEach(id => {
-    const el = document.getElementById(id);
-    const prev = el.value;
-    el.innerHTML = id === 'filterClient' ? '<option value="">All clients</option>' : '';
-    state.clients.forEach(c => {
-      const o = document.createElement('option'); o.value = c.id; o.textContent = c.name; el.appendChild(o);
-    });
-    if (prev) el.value = prev;
+  // Sync manual (always the real state — manual entry never applies to
+  // a teammate's data) + filter (whatever's currently being viewed) dropdowns
+  const el = document.getElementById('filterClient');
+  const prev = el.value;
+  el.innerHTML = '<option value="">All clients</option>';
+  activeState().clients.forEach(c => {
+    const o = document.createElement('option'); o.value = c.id; o.textContent = c.name; el.appendChild(o);
   });
+  if (prev) el.value = prev;
+
+  const manualEl = document.getElementById('manualClient');
+  const manualPrev = manualEl.value;
+  manualEl.innerHTML = '';
+  state.clients.forEach(c => {
+    const o = document.createElement('option'); o.value = c.id; o.textContent = c.name; manualEl.appendChild(o);
+  });
+  if (manualPrev) manualEl.value = manualPrev;
 }
 
 function addClient() {
@@ -750,7 +798,7 @@ function renderLog() {
   const filterClient = document.getElementById('filterClient').value;
   const filterMonth  = document.getElementById('filterMonth').value;
 
-  let entries = state.entries;
+  let entries = activeState().entries;
   if (filterClient) entries = entries.filter(e => e.clientId === filterClient);
   if (filterMonth)  entries = entries.filter(e => e.date.startsWith(filterMonth));
 
@@ -795,8 +843,9 @@ function renderLog() {
             <td>$${e.rate}/hr</td>
             <td class="amount">${fmtMoney(calcAmount(e.minutes, e.rate))}</td>
             <td style="display:flex;gap:4px">
+              ${teamViewActive ? '' : `
               <button class="del-row" onclick="editEntry('${e.id}')" title="Edit" style="color:var(--accent)">✎</button>
-              <button class="del-row" onclick="deleteEntry('${e.id}')" title="Delete">×</button>
+              <button class="del-row" onclick="deleteEntry('${e.id}')" title="Delete">×</button>`}
             </td>
           </tr>`).join('')}
       </tbody>
@@ -806,7 +855,7 @@ function renderLog() {
 // ── Summary ────────────────────────────────────────────
 function renderSummary() {
   const filterMonth = document.getElementById('filterMonth').value;
-  const entries = filterMonth ? state.entries.filter(e => e.date.startsWith(filterMonth)) : state.entries;
+  const entries = filterMonth ? activeState().entries.filter(e => e.date.startsWith(filterMonth)) : activeState().entries;
 
   const totalMin = entries.reduce((s, e) => s + e.minutes, 0);
   const totalAmt = entries.reduce((s, e) => s + calcAmount(e.minutes, e.rate), 0);
@@ -867,14 +916,14 @@ function renderCharts() {
 
   // Aggregate hours and revenue by month
   const hoursData = last6.map(m => {
-    const mins = state.entries
+    const mins = activeState().entries
       .filter(e => e.date.startsWith(m))
       .reduce((s, e) => s + e.minutes, 0);
     return +(mins / 60).toFixed(2);
   });
 
   const revenueData = last6.map(m => {
-    return +state.entries
+    return +activeState().entries
       .filter(e => e.date.startsWith(m))
       .reduce((s, e) => s + calcAmount(e.minutes, e.rate), 0)
       .toFixed(2);
@@ -882,8 +931,8 @@ function renderCharts() {
 
   // Client doughnut — use filtered entries if a month filter is active
   const filteredEntries = filterMonth
-    ? state.entries.filter(e => e.date.startsWith(filterMonth))
-    : state.entries;
+    ? activeState().entries.filter(e => e.date.startsWith(filterMonth))
+    : activeState().entries;
 
   const clientHours = {};
   filteredEntries.forEach(e => {
@@ -1021,7 +1070,7 @@ function renderCalendar() {
 
   // Build a map: date string -> { totalMin, totalAmt }
   const dayMap = {};
-  state.entries
+  activeState().entries
     .filter(e => e.date.startsWith(ym))
     .forEach(e => {
       if (!dayMap[e.date]) dayMap[e.date] = { min: 0, amt: 0 };
@@ -1081,7 +1130,7 @@ function calNext() {
 // ── Export CSV ─────────────────────────────────────────
 function exportCSV() {
   const filterMonth = document.getElementById('filterMonth').value;
-  let entries = filterMonth ? state.entries.filter(e => e.date.startsWith(filterMonth)) : state.entries;
+  let entries = filterMonth ? activeState().entries.filter(e => e.date.startsWith(filterMonth)) : activeState().entries;
 
   const rows = [['Date','Time','Client','Event Type','Location','Description','Duration (min)','Rate ($/hr)','Amount ($)']];
   entries.forEach(e => rows.push([
@@ -1366,8 +1415,16 @@ function confirmInvoice() {
 // ── OneDrive Sync ──────────────────────────────────────
 var odAccount = null;
 var msalInstance = null;
-var OD_SCOPES = ['Files.ReadWrite', 'User.Read'];
+// .All is required so the manager account can read a teammate's file that
+// lives in the teammate's own drive (once the teammate has shared it), and
+// so a teammate can grant that share via the items/invite call below.
+var OD_SCOPES = ['Files.ReadWrite.All', 'User.Read'];
 var OD_FILE = 'consulting-tracker-data.json';
+// The one account allowed to view (read-only) teammates' shared data.
+var MANAGER_UPN = 'taylor.wall@cirrobound.com';
+function isManager() {
+  return !!(odAccount && odAccount.username && odAccount.username.toLowerCase() === MANAGER_UPN.toLowerCase());
+}
 var MSAL_CONFIG = {
   auth: {
     clientId: 'd7780fb3-0904-400b-9020-24ada889456d',
@@ -1388,7 +1445,7 @@ window.addEventListener('load', function() {
         if (accounts.length > 0) odAccount = accounts[0];
       }
       updateSyncUI();
-      if (odAccount) { resetLocalStateForSignIn(); odLoad(true); }
+      if (odAccount) { resetLocalStateForSignIn(); odLoad(true); if (isManager()) refreshTeamSharedList(); }
     }).catch(function(e) { console.error('Redirect error:', e); updateSyncUI(); });
   } catch(e) { console.error('MSAL init error:', e); }
 });
@@ -1398,16 +1455,24 @@ function updateSyncUI() {
   var btnLoad = document.getElementById('btnOdLoad');
   var gate = document.getElementById('signInGate');
   var app  = document.querySelector('.app');
+  var teamCard = document.getElementById('teamViewCard');
+  var shareBtn = document.getElementById('btnShareWithManager');
   if (odAccount) {
     if (btnSign) btnSign.textContent = 'Sign out (' + (odAccount.name || odAccount.username) + ')';
     if (btnLoad) btnLoad.disabled = false;
     if (gate) gate.style.display = 'none';
     if (app)  app.style.display  = 'flex';
+    if (teamCard) teamCard.style.display = isManager() ? '' : 'none';
+    if (shareBtn) shareBtn.style.display = isManager() ? 'none' : '';
   } else {
     if (btnSign) btnSign.textContent = 'Sign in with Microsoft';
     if (btnLoad) btnLoad.disabled = true;
     if (gate) gate.style.display = 'flex';
     if (app)  app.style.display  = 'none';
+    if (teamCard) teamCard.style.display = 'none';
+    if (shareBtn) shareBtn.style.display = 'none';
+    teamViewActive = false;
+    teamViewState = null;
   }
 }
 
@@ -1434,6 +1499,113 @@ function isMobile() {
   return /Android|iPhone|iPad|iPod|Opera Mini|IEMobile|WPDesktop/i.test(navigator.userAgent);
 }
 
+// ── Team View (manager account only) ───────────────────
+// Reads teammates' data live and read-only, but only once a teammate has
+// explicitly shared their own file with the manager via shareMyDataWithManager
+// below — nothing here ever grants access or writes to anyone's OneDrive.
+async function refreshTeamSharedList() {
+  if (!isManager()) return;
+  try {
+    var token = await getOdToken();
+    if (!token) return;
+    var res = await fetch('https://graph.microsoft.com/v1.0/me/drive/sharedWithMe', {
+      headers: { Authorization: 'Bearer ' + token }
+    });
+    if (!res.ok) { console.warn('sharedWithMe failed:', await res.text()); return; }
+    var data = await res.json();
+    teamSharedItems = (data.value || [])
+      .filter(function(it) { return it.name === OD_FILE && it.remoteItem; })
+      .map(function(it) {
+        var owner = it.remoteItem.shared && it.remoteItem.shared.owner && it.remoteItem.shared.owner.user;
+        return {
+          label: (owner && (owner.displayName || owner.email)) || it.name,
+          driveId: it.remoteItem.parentReference.driveId,
+          itemId: it.remoteItem.id
+        };
+      });
+    renderTeamViewPicker();
+  } catch(e) { console.warn('refreshTeamSharedList error:', e.message); }
+}
+
+function renderTeamViewPicker() {
+  var pick = document.getElementById('teamViewPick');
+  if (!pick) return;
+  var prev = pick.value;
+  pick.innerHTML = '<option value="">My Data</option>';
+  teamSharedItems.forEach(function(item, i) {
+    var o = document.createElement('option'); o.value = i; o.textContent = item.label; pick.appendChild(o);
+  });
+  if (prev && +prev < teamSharedItems.length) pick.value = prev;
+}
+
+async function switchTeamView() {
+  var val = document.getElementById('teamViewPick').value;
+  if (val === '') { teamViewActive = false; teamViewState = null; render(); return; }
+  var item = teamSharedItems[+val];
+  if (!item) return;
+  try {
+    var token = await getOdToken();
+    var res = await fetch('https://graph.microsoft.com/v1.0/drives/' + item.driveId + '/items/' + item.itemId + '/content', {
+      headers: { Authorization: 'Bearer ' + token }
+    });
+    if (!res.ok) throw new Error(await res.text());
+    var loaded = await res.json();
+    if (!loaded.clients || !loaded.entries) throw new Error('Invalid data in teammate file.');
+    teamViewState = loaded;
+    teamViewActive = true;
+    render();
+  } catch(e) {
+    alert('Could not load teammate data: ' + e.message);
+    document.getElementById('teamViewPick').value = '';
+    teamViewActive = false;
+  }
+}
+
+// Creates the caller's own file if it doesn't exist yet (needed before it
+// can be shared) and returns its item id.
+async function ensureFileExistsAndGetId(token) {
+  var metaUrl = odGraphContentUrl().replace(':/content', '');
+  var metaRes = await fetch(metaUrl, { headers: { Authorization: 'Bearer ' + token } });
+  if (metaRes.status === 404) {
+    var putRes = await fetch(odGraphContentUrl(), {
+      method: 'PUT',
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify(state)
+    });
+    if (!putRes.ok) throw new Error(await putRes.text());
+    var putJson = await putRes.json();
+    return putJson.id;
+  }
+  if (!metaRes.ok) throw new Error(await metaRes.text());
+  var metaJson = await metaRes.json();
+  return metaJson.id;
+}
+
+// Shares only this one file (never the containing folder) with the
+// manager, read-only. This is the signed-in user sharing their own
+// resource — the manager account never grants itself access.
+async function shareMyDataWithManager() {
+  if (!odAccount) { alert('Please sign in first.'); return; }
+  if (isManager()) { alert('You are the manager account — nothing to share.'); return; }
+  if (!confirm('Share your time log with Taylor, read-only? He will be able to view (not edit) your entries.')) return;
+  try {
+    var token = await getOdToken();
+    var itemId = await ensureFileExistsAndGetId(token);
+    var res = await fetch('https://graph.microsoft.com/v1.0/me/drive/items/' + itemId + '/invite', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        requireSignIn: true,
+        sendInvitation: false,
+        roles: ['read'],
+        recipients: [{ email: MANAGER_UPN }]
+      })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    alert('Shared! Taylor can now view your time log (read-only).');
+  } catch(e) { alert('Share failed: ' + e.message); }
+}
+
 async function odSignIn() {
   if (!msalInstance) { alert('Sign-in not ready yet — please wait a moment and try again.'); return; }
   if (odAccount) {
@@ -1454,6 +1626,7 @@ async function odSignIn() {
       updateSyncUI();
       resetLocalStateForSignIn();
       odLoad(true);
+      if (isManager()) refreshTeamSharedList();
     }
   } catch(e) { alert('Sign in failed: ' + e.message); }
 }
