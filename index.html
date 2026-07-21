@@ -505,6 +505,13 @@ function roundTo15(ms) {
   const min = ms / 60000;
   return Math.max(15, Math.round(min / 15) * 15);
 }
+// Taylor bills in 15-min increments; everyone else's timer rounds to the
+// nearest minute instead. isManager() is defined later in the file but
+// available here by the time this is ever actually called.
+function roundTimerElapsed(ms) {
+  if (isManager()) return roundTo15(ms);
+  return Math.max(1, Math.round(ms / 60000));
+}
 function calcAmount(minutes, rate) { return (minutes / 60) * rate; }
 function fmtMoney(n) { return '$' + n.toFixed(2); }
 function fmtDate(iso) {
@@ -722,7 +729,7 @@ function stopTimer() {
   const wasRunning = timerSegmentStart !== null;
   if (wasRunning) { timerAccumMs += Date.now() - timerSegmentStart; timerSegmentStart = null; }
   clearInterval(timerInterval); timerInterval = null;
-  const minutes = roundTo15(timerAccumMs);
+  const minutes = roundTimerElapsed(timerAccumMs);
   const note = prompt(`Rounded to ${fmtDur(minutes)}. Add a note (optional):`);
   if (note === null) {
     // cancelled — resume exactly where we left off (running or paused)
