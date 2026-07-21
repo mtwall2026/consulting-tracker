@@ -333,6 +333,7 @@
       <div class="timer-client" id="timerClient">Select a client to start</div>
       <div class="timer-btns">
         <button class="btn btn-success" id="btnStart" onclick="startTimer()">&#9654; Start</button>
+        <button class="btn btn-ghost"   id="btnPause" onclick="togglePauseTimer()" disabled>&#9208; Pause</button>
         <button class="btn btn-danger"  id="btnStop"  onclick="stopTimer()" disabled>&#9632; Stop &amp; Log</button>
         <button class="btn btn-ghost"   id="btnDiscard" onclick="discardTimer()" disabled>&#10005; Discard</button>
       </div>
@@ -430,8 +431,9 @@
 // ── State ──────────────────────────────────────────────
 let state = load();
 let timerInterval = null;
-let timerStart = null;
 let timerClientId = null;
+let timerAccumMs = 0;        // elapsed ms from completed (paused) segments
+let timerSegmentStart = null; // Date.now() when the current running segment began; null while paused/stopped
 
 // Chart instances (kept so we can destroy before recreating)
 let chartHoursMonthInst = null;
@@ -529,6 +531,7 @@ function init() {
   // Month filter starts on All
   document.getElementById('filterMonth').value = '';
 
+  restoreTimerState();
   render();
   odInit();
 }
@@ -631,7 +634,7 @@ function deleteClient(id) {
 }
 
 function selectClient(id) {
-  if (timerInterval) return; // don't switch while running
+  if (timerSegmentStart !== null || timerAccumMs > 0) return; // don't switch mid-session (running or paused)
   timerClientId = id;
   const c = state.clients.find(c => c.id === id);
   document.getElementById('timerClient').textContent = c ? `Billing to: ${c.name} @ $${c.rate}/hr` : 'Select a client';
@@ -639,17 +642,75 @@ function selectClient(id) {
 }
 
 // ── Timer ──────────────────────────────────────────────
+// Persists across page reloads/sessions via localStorage('ct_timer'):
+// only the client, accumulated ms, and the current segment's start time
+// need saving — tickTimer() always recomputes the display from those.
+function timerElapsedMs() {
+  return timerAccumMs + (timerSegmentStart !== null ? Date.now() - timerSegmentStart : 0);
+}
+function saveTimerState() {
+  try {
+    if (!timerClientId) { localStorage.removeItem('ct_timer'); return; }
+    localStorage.setItem('ct_timer', JSON.stringify({
+      clientId: timerClientId, accumMs: timerAccumMs, segmentStart: timerSegmentStart
+    }));
+  } catch(e) { console.error('Timer save failed:', e); }
+}
+function clearTimerState() { localStorage.removeItem('ct_timer'); }
+function restoreTimerState() {
+  try {
+    const raw = localStorage.getItem('ct_timer');
+    if (!raw) return;
+    const t = JSON.parse(raw);
+    const client = t && t.clientId && state.clients.find(c => c.id === t.clientId);
+    if (!client) { clearTimerState(); return; } // client was deleted while away
+    timerClientId = t.clientId;
+    timerAccumMs = t.accumMs || 0;
+    timerSegmentStart = t.segmentStart || null;
+    document.getElementById('timerClient').textContent = `Billing to: ${client.name} @ $${client.rate}/hr`;
+    setTimerControlsActive(true);
+    if (timerSegmentStart !== null) timerInterval = setInterval(tickTimer, 500);
+    tickTimer();
+  } catch(e) { console.error('Timer restore failed:', e); }
+}
+
+function setTimerControlsActive(active) {
+  document.getElementById('btnStart').disabled = active;
+  document.getElementById('btnPause').disabled = !active;
+  document.getElementById('btnStop').disabled = !active;
+  document.getElementById('btnDiscard').disabled = !active;
+  updatePauseButtonLabel();
+}
+function updatePauseButtonLabel() {
+  document.getElementById('btnPause').innerHTML = timerSegmentStart !== null ? '&#9208; Pause' : '&#9654; Resume';
+}
+
 function startTimer() {
   if (!timerClientId) { alert('Select a client first.'); return; }
-  timerStart = Date.now();
+  timerAccumMs = 0;
+  timerSegmentStart = Date.now();
   timerInterval = setInterval(tickTimer, 500);
-  document.getElementById('btnStart').disabled = true;
-  document.getElementById('btnStop').disabled = false;
-  document.getElementById('btnDiscard').disabled = false;
+  setTimerControlsActive(true);
+  saveTimerState();
+  tickTimer();
+}
+
+function togglePauseTimer() {
+  if (timerSegmentStart !== null) {
+    timerAccumMs += Date.now() - timerSegmentStart;
+    timerSegmentStart = null;
+    clearInterval(timerInterval); timerInterval = null;
+  } else {
+    timerSegmentStart = Date.now();
+    timerInterval = setInterval(tickTimer, 500);
+  }
+  updatePauseButtonLabel();
+  saveTimerState();
+  tickTimer();
 }
 
 function tickTimer() {
-  const elapsed = Date.now() - timerStart;
+  const elapsed = timerElapsedMs();
   const s = Math.floor(elapsed / 1000);
   const hh = String(Math.floor(s / 3600)).padStart(2, '0');
   const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
@@ -658,18 +719,22 @@ function tickTimer() {
 }
 
 function stopTimer() {
+  const wasRunning = timerSegmentStart !== null;
+  if (wasRunning) { timerAccumMs += Date.now() - timerSegmentStart; timerSegmentStart = null; }
   clearInterval(timerInterval); timerInterval = null;
-  const elapsed = Date.now() - timerStart;
-  const minutes = roundTo15(elapsed);
+  const minutes = roundTo15(timerAccumMs);
   const note = prompt(`Rounded to ${fmtDur(minutes)}. Add a note (optional):`);
-  if (note === null) { resumeTimer(); return; } // cancelled
+  if (note === null) {
+    // cancelled — resume exactly where we left off (running or paused)
+    if (wasRunning) { timerSegmentStart = Date.now(); timerInterval = setInterval(tickTimer, 500); }
+    updatePauseButtonLabel();
+    saveTimerState();
+    tickTimer();
+    return;
+  }
   const now = new Date();
   logEntry(timerClientId, now.toISOString().slice(0,10), now.toTimeString().slice(0,5), minutes, note || '');
   resetTimerUI();
-}
-
-function resumeTimer() {
-  timerInterval = setInterval(tickTimer, 500);
 }
 
 function discardTimer() {
@@ -679,11 +744,11 @@ function discardTimer() {
 }
 
 function resetTimerUI() {
-  timerStart = null;
+  timerAccumMs = 0;
+  timerSegmentStart = null;
+  clearTimerState();
   document.getElementById('timerDisplay').textContent = '00:00:00';
-  document.getElementById('btnStart').disabled = false;
-  document.getElementById('btnStop').disabled = true;
-  document.getElementById('btnDiscard').disabled = true;
+  setTimerControlsActive(false);
 }
 
 function fillNow() {
