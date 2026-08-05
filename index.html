@@ -299,6 +299,7 @@
       <div class="sync-divider"></div>
       <button class="btn btn-ghost btn-sm" id="btnOdSign" onclick="odSignIn()">Sign in with Microsoft</button>
       <button class="btn btn-ghost btn-sm" id="btnOdLoad" onclick="odLoad()" disabled>&#9729; Load</button>
+      <span id="odSyncStatus" style="display:none;color:var(--danger);font-size:0.8rem;align-self:center;max-width:220px">&#9888; Could not refresh from OneDrive — showing last saved data. Click Load to retry.</span>
     </div>
   </header>
 
@@ -522,6 +523,10 @@ function save() {
     const data = JSON.stringify(state);
     localStorage.setItem('ct_state', data);
     localStorage.setItem('ct_state_backup', data); // keep a backup
+    // Remember which account this data belongs to, so a future sign-in only
+    // wipes local state when it's provably a *different* account (shared
+    // device protection) — never for this same account returning.
+    if (odAccount && odAccount.username) localStorage.setItem('ct_last_account', odAccount.username);
   } catch(e) { console.error('Save failed:', e); }
 }
 function clearAllData() {
@@ -1884,7 +1889,7 @@ window.addEventListener('load', function() {
         if (accounts.length > 0) odAccount = accounts[0];
       }
       updateSyncUI();
-      if (odAccount) { resetLocalStateForSignIn(); odLoad(true); if (isManager()) refreshTeamSharedList(); }
+      if (odAccount) handleSignedIn();
     }).catch(function(e) { console.error('Redirect error:', e); updateSyncUI(); });
   } catch(e) { console.error('MSAL init error:', e); }
 });
@@ -1925,6 +1930,35 @@ function resetLocalStateForSignIn() {
   state = defaultState();
   save();
   render();
+  hideSyncWarning();
+}
+
+function isSameSignedInAccountAsBefore() {
+  try {
+    const last = localStorage.getItem('ct_last_account');
+    return !!(last && odAccount && odAccount.username && last.toLowerCase() === odAccount.username.toLowerCase());
+  } catch(e) { return false; }
+}
+
+// Runs after every successful sign-in — both a fresh login and MSAL simply
+// resolving a returning session on page load. Only wipes local state when
+// it's provably a *different* account than last time on this browser (the
+// shared-device protection resetLocalStateForSignIn exists for); a network
+// hiccup during the OneDrive refresh below can then never make your own
+// data look like it vanished, because it was never touched to begin with.
+async function handleSignedIn() {
+  if (!isSameSignedInAccountAsBefore()) resetLocalStateForSignIn();
+  await odLoad(true);
+  if (isManager()) refreshTeamSharedList();
+}
+
+function showSyncWarning() {
+  const el = document.getElementById('odSyncStatus');
+  if (el) el.style.display = 'inline';
+}
+function hideSyncWarning() {
+  const el = document.getElementById('odSyncStatus');
+  if (el) el.style.display = 'none';
 }
 
 // Every signed-in account reads/writes its own file in its own OneDrive —
@@ -2074,9 +2108,7 @@ async function odSignIn() {
       var resp = await msalInstance.loginPopup({ scopes: OD_SCOPES });
       odAccount = resp.account;
       updateSyncUI();
-      resetLocalStateForSignIn();
-      odLoad(true);
-      if (isManager()) refreshTeamSharedList();
+      await handleSignedIn();
     }
   } catch(e) { alert('Sign in failed: ' + e.message); }
 }
@@ -2143,10 +2175,11 @@ async function odLoad(silent) {
     state = migrateState(loaded);
     save();
     render();
+    hideSyncWarning();
     if (!silent) alert('Loaded from OneDrive successfully.');
   } catch(e) {
     if (!silent) alert('Load failed: ' + e.message);
-    else console.warn('OneDrive auto-load failed:', e.message);
+    else { console.warn('OneDrive auto-load failed:', e.message); showSyncWarning(); }
   }
 }
 
