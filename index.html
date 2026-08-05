@@ -2302,19 +2302,28 @@ function removeRetainerStatus() {
   save(); render();
 }
 
+// A month already has SOME invoice on record for this client — whether
+// generated via the split Fee/Overage flows below, or via the general
+// Print/Email Invoice modal (which writes the plain "clientId-month" key,
+// no suffix, and covers fee+overage combined). Either one means this month
+// is already billed and must never be offered again by the other flow.
+function monthAlreadyInvoiced(client, monthStr, suffix) {
+  const invoiceNumbers = state.invoiceNumbers || {};
+  return !!(invoiceNumbers[`${client.id}-${monthStr}-${suffix}`] || invoiceNumbers[`${client.id}-${monthStr}`]);
+}
+
 // Fee invoices are due at the START of each month — the flat fee is owed
 // regardless of hours, so it doesn't wait on anything. Walks forward one
 // calendar month at a time from the retainer start date, returning the
-// first month without a "-fee" invoice number yet. Null once everything
-// through the current month is invoiced, or no start date is set.
+// first month that isn't already invoiced (by either flow). Null once
+// everything through the current month is invoiced, or no start date is set.
 function findNextUnbilledFeeMonth(client) {
   if (!client || client.billingType !== 'retainer' || !client.retainerStartDate) return null;
   const currentMonth = new Date().toISOString().slice(0, 7);
   let [y, m] = client.retainerStartDate.slice(0, 7).split('-').map(Number);
-  const invoiceNumbers = state.invoiceNumbers || {};
   while (true) {
     const monthStr = `${y}-${String(m).padStart(2, '0')}`;
-    if (!invoiceNumbers[`${client.id}-${monthStr}-fee`]) return monthStr;
+    if (!monthAlreadyInvoiced(client, monthStr, 'fee')) return monthStr;
     if (monthStr >= currentMonth) return null;
     m++; if (m > 12) { m = 1; y++; }
   }
@@ -2322,16 +2331,16 @@ function findNextUnbilledFeeMonth(client) {
 
 // Overage invoices are only meaningful once a month is fully over (so all
 // its hours are known) and only if hours actually exceeded the allotment —
-// a month with no overage is simply skipped, never invoiced.
+// a month with no overage is simply skipped, never invoiced. Also respects
+// any invoice already on record for that month from the general modal.
 function findNextUnbilledOverageMonth(client) {
   if (!client || client.billingType !== 'retainer' || !client.retainerStartDate) return null;
   const currentMonth = new Date().toISOString().slice(0, 7);
   let [y, m] = client.retainerStartDate.slice(0, 7).split('-').map(Number);
-  const invoiceNumbers = state.invoiceNumbers || {};
   while (true) {
     const monthStr = `${y}-${String(m).padStart(2, '0')}`;
     if (monthStr >= currentMonth) return null; // this month hasn't finished yet
-    if (!invoiceNumbers[`${client.id}-${monthStr}-overage`]) {
+    if (!monthAlreadyInvoiced(client, monthStr, 'overage')) {
       const hours = state.entries
         .filter(e => e.clientId === client.id && e.date.startsWith(monthStr) && isEntryUnderRetainer(client, e))
         .reduce((s, e) => s + e.minutes, 0) / 60;
