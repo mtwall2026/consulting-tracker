@@ -318,6 +318,7 @@
   <div class="view-tabs">
     <button class="view-tab active" id="tabTimeTracking" onclick="switchView('timeTracking')">Time Tracking</button>
     <button class="view-tab" id="tabExpenses" onclick="switchView('expenses')">Expenses</button>
+    <button class="view-tab" id="tabRetainers" onclick="switchView('retainers')">Retainers</button>
   </div>
 
   <!-- Team View (manager account only) — visible on either tab, since it
@@ -343,20 +344,7 @@
     <div class="add-client-row" id="addClientRow">
       <input id="newClientName" placeholder="Client name (e.g. Century 3)" maxlength="40" />
       <select id="newClientRate"></select>
-      <select id="newClientBillingType" onchange="updateClientFormMode()">
-        <option value="hourly">Hourly</option>
-        <option value="retainer">Retainer</option>
-      </select>
-      <span id="retainerFieldsWrap" style="display:none">
-        <input type="number" id="newClientRetainerAmount" placeholder="Retainer $/mo" min="0" step="1" style="width:130px" />
-        <input type="number" id="newClientRetainerHours" placeholder="Included hrs" min="0" step="0.5" style="width:110px" />
-        <input type="number" id="newClientOverageRate" placeholder="Overage $/hr (opt.)" min="0" step="1" style="width:160px" />
-        <label style="display:flex;flex-direction:column;gap:2px;font-size:0.72rem;color:var(--muted)">Retainer starts (leave blank if always retainer)
-          <input type="date" id="newClientRetainerStartDate" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:7px 10px;font-size:0.9rem" />
-        </label>
-      </span>
-      <button class="btn btn-primary" id="btnAddClient" onclick="addClient()">+ Add Client</button>
-      <button class="btn btn-ghost" id="btnCancelEditClient" onclick="cancelEditClient()" style="display:none">Cancel</button>
+      <button class="btn btn-primary" onclick="addClient()">+ Add Client</button>
     </div>
   </div>
 
@@ -540,6 +528,41 @@
 
   </div> <!-- /viewExpenses -->
 
+  <!-- ══════════════ Retainers page ══════════════ -->
+  <div id="viewRetainers" style="display:none">
+
+  <!-- Retainer Setup -->
+  <div class="card">
+    <h2>Retainer Setup</h2>
+    <div class="manual-row">
+      <label>Client
+        <select id="retainerClientPick" onchange="loadRetainerConfigIntoForm()"></select>
+      </label>
+      <label>Retainer $/mo
+        <input type="number" id="retainerAmountInput" min="0" step="1" style="width:120px" />
+      </label>
+      <label>Included hrs
+        <input type="number" id="retainerHoursInput" min="0" step="0.5" style="width:100px" />
+      </label>
+      <label>Overage $/hr (opt.)
+        <input type="number" id="retainerOverageRateInput" min="0" step="1" style="width:130px" />
+      </label>
+      <label>Retainer starts (blank = always)
+        <input type="date" id="retainerStartDateInput" />
+      </label>
+      <button class="btn btn-primary" onclick="saveRetainerConfig()" style="align-self:flex-end">Save Retainer</button>
+      <button class="btn btn-ghost" onclick="removeRetainerStatus()" style="align-self:flex-end;color:var(--danger)">Remove Retainer Status</button>
+    </div>
+  </div>
+
+  <!-- Retainer Clients -->
+  <div class="card">
+    <h2>Retainer Clients</h2>
+    <div id="retainerClientsBody"></div>
+  </div>
+
+  </div> <!-- /viewRetainers -->
+
 </div>
 
 <script>
@@ -568,11 +591,15 @@ function switchView(view) {
   currentView = view;
   document.getElementById('viewTimeTracking').style.display = view === 'timeTracking' ? '' : 'none';
   document.getElementById('viewExpenses').style.display = view === 'expenses' ? '' : 'none';
+  document.getElementById('viewRetainers').style.display = view === 'retainers' ? '' : 'none';
   document.getElementById('tabTimeTracking').classList.toggle('active', view === 'timeTracking');
   document.getElementById('tabExpenses').classList.toggle('active', view === 'expenses');
+  document.getElementById('tabRetainers').classList.toggle('active', view === 'retainers');
   // Chart.js can't size a canvas correctly while its container is
   // display:none, so redraw whichever page's charts just became visible.
-  if (view === 'timeTracking') renderCharts(); else renderExpenseCharts();
+  if (view === 'timeTracking') renderCharts();
+  else if (view === 'expenses') renderExpenseCharts();
+  else renderRetainersList();
 }
 
 // ── Team View (manager account only) ───────────────────
@@ -674,10 +701,14 @@ function isEntryUnderRetainer(client, entry) {
 // hourly client just converted mid-relationship) still bill at their own
 // logged hourly rate, unaffected by the switch; entries on/after that date
 // get a flat fee for every distinct calendar month with at least one entry,
-// plus overage for hours beyond that month's included allotment. Charging
-// only applies to months with logged activity, so invoicing is expected to
-// target a specific month (the app already works that way).
-function calcClientBilling(client, entries) {
+// plus overage for hours beyond that month's included allotment.
+//
+// targetMonth (optional, 'YYYY-MM'): force that month to be charged even if
+// it has zero logged entries — a retainer fee is owed whether or not any
+// hours were worked, which matters for a specific single-month invoice.
+// Without it (e.g. an "All Time" view), only months with logged activity
+// are counted, since there's no other way to know which months are billable.
+function calcClientBilling(client, entries, targetMonth) {
   if (!client || client.billingType !== 'retainer') {
     return { isRetainer: false, amount: entries.reduce((s, e) => s + calcAmount(e.minutes, e.rate), 0) };
   }
@@ -692,6 +723,9 @@ function calcClientBilling(client, entries) {
     const m = e.date.slice(0, 7);
     minutesByMonth[m] = (minutesByMonth[m] || 0) + e.minutes;
   });
+  if (targetMonth && isEntryUnderRetainer(client, { date: targetMonth + '-01' }) && !(targetMonth in minutesByMonth)) {
+    minutesByMonth[targetMonth] = 0;
+  }
   const months = Object.keys(minutesByMonth);
   let fee = 0, overageHours = 0, overageAmount = 0;
   months.forEach(m => {
@@ -748,10 +782,12 @@ function render() {
   renderExpenseMonthFilter();
   renderExpenseLog();
   renderExpenseSummary();
+  renderRetainersList();
   // Chart.js can't size a canvas correctly while its container is
   // display:none, so only (re)build charts for the currently visible
   // page — switchView() renders the other page's charts on demand.
-  if (currentView === 'timeTracking') renderCharts(); else renderExpenseCharts();
+  if (currentView === 'timeTracking') renderCharts();
+  else if (currentView === 'expenses') renderExpenseCharts();
 }
 
 // Hides/disables every control that mutates data while viewing a
@@ -802,13 +838,9 @@ function renderClients() {
   activeState().clients.forEach(c => {
     const div = document.createElement('div');
     div.className = 'client-chip' + (timerClientId === c.id ? ' active' : '');
-    const rateLabel = c.billingType === 'retainer'
-      ? `$${c.retainerAmount}/mo${c.retainerHours ? ` (${c.retainerHours}h incl.)` : ''}`
-      : `$${c.rate}/hr`;
     div.innerHTML = teamViewActive
-      ? `<span>${c.name}</span><span class="rate">${rateLabel}</span>`
-      : `<span>${c.name}</span><span class="rate">${rateLabel}</span>
-      <button class="del" title="Edit client" onclick="editClientPrompt('${c.id}')" style="color:var(--muted)">&#9998;</button>
+      ? `<span>${c.name}</span><span class="rate">$${c.rate}/hr</span>`
+      : `<span>${c.name}</span><span class="rate">$${c.rate}/hr</span>
       <button class="del" title="Delete client" onclick="deleteClient('${c.id}')">×</button>`;
     if (!teamViewActive) div.addEventListener('click', e => { if (!e.target.classList.contains('del')) selectClient(c.id); });
     grid.appendChild(div);
@@ -850,74 +882,19 @@ function renderClients() {
     const o = document.createElement('option'); o.value = c.id; o.textContent = c.name; filterExpenseClientEl.appendChild(o);
   });
   if (filterExpenseClientPrev) filterExpenseClientEl.value = filterExpenseClientPrev;
-}
 
-// Which client's chip is currently being edited via the Add Client form
-// (null when the form is in "add new" mode).
-let editingClientId = null;
-
-function updateClientFormMode() {
-  const billingType = document.getElementById('newClientBillingType').value;
-  const wrap = document.getElementById('retainerFieldsWrap');
-  wrap.style.display = billingType === 'retainer' ? 'contents' : 'none';
-  document.getElementById('btnAddClient').textContent = editingClientId ? 'Update Client' : '+ Add Client';
-  document.getElementById('btnCancelEditClient').style.display = editingClientId ? '' : 'none';
-}
-
-function editClientPrompt(id) {
-  const c = state.clients.find(c => c.id === id);
-  if (!c) return;
-  editingClientId = id;
-  document.getElementById('newClientName').value = c.name;
-  document.getElementById('newClientRate').value = c.rate;
-  document.getElementById('newClientBillingType').value = c.billingType === 'retainer' ? 'retainer' : 'hourly';
-  document.getElementById('newClientRetainerAmount').value = c.retainerAmount || '';
-  document.getElementById('newClientRetainerHours').value = c.retainerHours || '';
-  document.getElementById('newClientOverageRate').value = c.overageRate || '';
-  document.getElementById('newClientRetainerStartDate').value = c.retainerStartDate || '';
-  updateClientFormMode();
-  document.getElementById('newClientName').scrollIntoView({ behavior: 'smooth', block: 'center' });
-}
-
-function cancelEditClient() {
-  editingClientId = null;
-  document.getElementById('newClientName').value = '';
-  document.getElementById('newClientRate').value = 200;
-  document.getElementById('newClientBillingType').value = 'hourly';
-  document.getElementById('newClientRetainerAmount').value = '';
-  document.getElementById('newClientRetainerHours').value = '';
-  document.getElementById('newClientOverageRate').value = '';
-  document.getElementById('newClientRetainerStartDate').value = '';
-  updateClientFormMode();
+  // Retainer Setup's client picker always uses the real state — retainer
+  // configuration is a Taylor-only billing concern, like invoicing already was.
+  renderRetainerClientPicker();
 }
 
 function addClient() {
   const name = document.getElementById('newClientName').value.trim();
   const rate = parseInt(document.getElementById('newClientRate').value);
-  const billingType = document.getElementById('newClientBillingType').value;
-  const retainerAmount = parseFloat(document.getElementById('newClientRetainerAmount').value) || 0;
-  const retainerHours = parseFloat(document.getElementById('newClientRetainerHours').value) || 0;
-  const overageRateInput = document.getElementById('newClientOverageRate').value;
-  const overageRate = overageRateInput ? parseFloat(overageRateInput) : rate;
-  // Blank = always billed as retainer (e.g. a brand-new client). Set this
-  // when converting an existing hourly client so their past entries keep
-  // billing at the old hourly rate instead of being retroactively folded
-  // into the retainer fee.
-  const retainerStartDate = document.getElementById('newClientRetainerStartDate').value || '';
-
   if (!name) { alert('Enter a client name.'); return; }
   if (!rate) { alert('Select a rate.'); return; }
-  if (billingType === 'retainer' && (!retainerAmount || retainerAmount <= 0)) { alert('Enter a retainer amount.'); return; }
-
-  const clientData = { name, rate, billingType, retainerAmount, retainerHours, overageRate, retainerStartDate };
-
-  if (editingClientId) {
-    const idx = state.clients.findIndex(c => c.id === editingClientId);
-    if (idx !== -1) state.clients[idx] = { ...state.clients[idx], ...clientData };
-  } else {
-    state.clients.push({ id: uid(), ...clientData });
-  }
-  cancelEditClient();
+  state.clients.push({ id: uid(), name, rate });
+  document.getElementById('newClientName').value = '';
   save(); render();
 }
 
@@ -925,7 +902,6 @@ function deleteClient(id) {
   if (!confirm('Delete this client? Their logged entries will remain.')) return;
   state.clients = state.clients.filter(c => c.id !== id);
   if (timerClientId === id) discardTimer();
-  if (editingClientId === id) cancelEditClient();
   save(); render();
 }
 
@@ -1986,10 +1962,13 @@ function resetInvoiceNumbers() {
 }
 
 // ── Email Invoice ──────────────────────────────────────
-function emailInvoice() {
+// explicitClientId/explicitMonth let the Retainers tab's "Generate Next
+// Invoice" reuse this exact same invoice logic instead of requiring the
+// client+month picker modal.
+function emailInvoice(explicitClientId, explicitMonth) {
   closeInvoiceModal();
-  const filterClient = document.getElementById('invoiceClientPick').value;
-  const filterMonth  = document.getElementById('invoiceMonthPick').value;
+  const filterClient = explicitClientId || document.getElementById('invoiceClientPick').value;
+  const filterMonth   = explicitMonth !== undefined ? explicitMonth : document.getElementById('invoiceMonthPick').value;
   if (!filterClient) return;
 
   // Reuse or assign invoice number
@@ -2015,7 +1994,7 @@ function emailInvoice() {
   expenses = [...expenses].sort((a, b) => a.date.localeCompare(b.date));
 
   const totalMin = entries.reduce((s, e) => s + e.minutes, 0);
-  const billing = calcClientBilling(client, entries);
+  const billing = calcClientBilling(client, entries, filterMonth || undefined);
   const totalAmt = billing.amount;
   const expensesTotal = expenses.reduce((s, e) => s + e.amount, 0);
   const grandTotal = totalAmt + expensesTotal;
@@ -2127,10 +2106,10 @@ function emailInvoice() {
   window.location.href = `mailto:?subject=${subject}&body=${bodyEnc}`;
 }
 
-function confirmInvoice() {
+function confirmInvoice(explicitClientId, explicitMonth) {
   closeInvoiceModal();
-  const filterClient = document.getElementById('invoiceClientPick').value;
-  const filterMonth  = document.getElementById('invoiceMonthPick').value;
+  const filterClient = explicitClientId || document.getElementById('invoiceClientPick').value;
+  const filterMonth   = explicitMonth !== undefined ? explicitMonth : document.getElementById('invoiceMonthPick').value;
   if (!filterClient) return;
 
   // Reuse existing invoice number for same client+month, or assign new one
@@ -2156,7 +2135,7 @@ function confirmInvoice() {
   expenses = [...expenses].sort((a, b) => a.date.localeCompare(b.date));
 
   const totalMin = entries.reduce((s, e) => s + e.minutes, 0);
-  const billing = calcClientBilling(client, entries);
+  const billing = calcClientBilling(client, entries, filterMonth || undefined);
   const totalAmt = billing.amount;
   const expensesTotal = expenses.reduce((s, e) => s + e.amount, 0);
   const grandTotal = totalAmt + expensesTotal;
@@ -2262,6 +2241,137 @@ function confirmInvoice() {
   <script>window.onload = () => { window.print(); }<\/script>
   </body></html>`);
   win.document.close();
+}
+
+// ── Retainers ────────────────────────────────────────────
+// Retainer clients are still regular entries in state.clients (so hours can
+// still be logged against them for overage tracking) — this page is purely
+// a dedicated place to configure that side and generate their invoices,
+// always against the real state.clients (Taylor's own data), matching how
+// invoicing already worked before Team View existed.
+function renderRetainerClientPicker() {
+  const el = document.getElementById('retainerClientPick');
+  if (!el) return;
+  const prev = el.value;
+  el.innerHTML = '';
+  state.clients.forEach(c => {
+    const o = document.createElement('option'); o.value = c.id; o.textContent = c.name; el.appendChild(o);
+  });
+  if (prev && state.clients.some(c => c.id === prev)) el.value = prev;
+  loadRetainerConfigIntoForm();
+}
+
+function loadRetainerConfigIntoForm() {
+  const id = document.getElementById('retainerClientPick').value;
+  const c = state.clients.find(c => c.id === id);
+  document.getElementById('retainerAmountInput').value = (c && c.retainerAmount) || '';
+  document.getElementById('retainerHoursInput').value = (c && c.retainerHours) || '';
+  document.getElementById('retainerOverageRateInput').value = (c && c.overageRate) || '';
+  document.getElementById('retainerStartDateInput').value = (c && c.retainerStartDate) || '';
+}
+
+function saveRetainerConfig() {
+  const id = document.getElementById('retainerClientPick').value;
+  const idx = state.clients.findIndex(c => c.id === id);
+  if (idx === -1) { alert('Select a client first.'); return; }
+
+  const retainerAmount = parseFloat(document.getElementById('retainerAmountInput').value) || 0;
+  const retainerHours = parseFloat(document.getElementById('retainerHoursInput').value) || 0;
+  const overageRateInput = document.getElementById('retainerOverageRateInput').value;
+  const overageRate = overageRateInput ? parseFloat(overageRateInput) : state.clients[idx].rate;
+  const retainerStartDate = document.getElementById('retainerStartDateInput').value || '';
+
+  if (!retainerAmount || retainerAmount <= 0) { alert('Enter a retainer amount.'); return; }
+
+  state.clients[idx] = {
+    ...state.clients[idx],
+    billingType: 'retainer',
+    retainerAmount, retainerHours, overageRate, retainerStartDate
+  };
+  save(); render();
+  alert(`${state.clients[idx].name} is now billed as a retainer client.`);
+}
+
+function removeRetainerStatus() {
+  const id = document.getElementById('retainerClientPick').value;
+  const idx = state.clients.findIndex(c => c.id === id);
+  if (idx === -1) return;
+  if (!confirm(`Switch ${state.clients[idx].name} back to plain hourly billing?`)) return;
+  state.clients[idx] = { ...state.clients[idx], billingType: 'hourly' };
+  save(); render();
+}
+
+// Walks forward one calendar month at a time from a retainer client's
+// start date, returning the first month that doesn't already have an
+// invoice number assigned — i.e. the next one due. Returns null once
+// everything through the current month has already been invoiced, or if
+// no start date has been set yet (can't determine a sequence without one).
+function findNextUnbilledMonth(client) {
+  if (!client || client.billingType !== 'retainer' || !client.retainerStartDate) return null;
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  let [y, m] = client.retainerStartDate.slice(0, 7).split('-').map(Number);
+  const invoiceNumbers = state.invoiceNumbers || {};
+  while (true) {
+    const monthStr = `${y}-${String(m).padStart(2, '0')}`;
+    if (!invoiceNumbers[`${client.id}-${monthStr}`]) return monthStr;
+    if (monthStr >= currentMonth) return null;
+    m++; if (m > 12) { m = 1; y++; }
+  }
+}
+
+function generateNextRetainerInvoice(clientId, mode) {
+  const client = state.clients.find(c => c.id === clientId);
+  if (!client) return;
+  const month = findNextUnbilledMonth(client);
+  if (!month) {
+    alert(client.retainerStartDate
+      ? 'Already caught up — nothing new to invoice yet.'
+      : 'Set a retainer start date first so the next invoice period can be determined.');
+    return;
+  }
+  if (mode === 'email') emailInvoice(clientId, month);
+  else confirmInvoice(clientId, month);
+  renderRetainersList();
+}
+
+function renderRetainersList() {
+  const body = document.getElementById('retainerClientsBody');
+  if (!body) return;
+  const retainerClients = state.clients.filter(c => c.billingType === 'retainer');
+  if (!retainerClients.length) { body.innerHTML = '<p class="empty">No retainer clients yet — set one up above.</p>'; return; }
+
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  body.innerHTML = `
+    <table>
+      <thead><tr>
+        <th>Client</th><th>Retainer</th><th>Included</th><th>Overage Rate</th>
+        <th>Starts</th><th>This Month</th><th>Next Invoice</th><th></th>
+      </tr></thead>
+      <tbody>
+        ${retainerClients.map(c => {
+          const hoursThisMonth = state.entries
+            .filter(e => e.clientId === c.id && e.date.startsWith(currentMonth))
+            .reduce((s, e) => s + e.minutes, 0) / 60;
+          const included = c.retainerHours || 0;
+          const over = Math.max(0, hoursThisMonth - included);
+          const nextMonth = findNextUnbilledMonth(c);
+          return `
+          <tr>
+            <td><span class="badge">${c.name}</span></td>
+            <td>${fmtMoney(c.retainerAmount || 0)}/mo</td>
+            <td>${c.retainerHours || 0}h</td>
+            <td>${fmtMoney(c.overageRate || c.rate)}/hr</td>
+            <td>${c.retainerStartDate ? fmtDate(c.retainerStartDate) : '—'}</td>
+            <td>${hoursThisMonth.toFixed(1)}h${over > 0 ? ` <span style="color:var(--danger)">(+${over.toFixed(1)}h over)</span>` : ''}</td>
+            <td>${nextMonth ? new Date(nextMonth + '-02').toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : '<span style="color:var(--muted)">All caught up</span>'}</td>
+            <td style="display:flex;gap:6px">
+              <button class="btn btn-primary btn-sm" onclick="generateNextRetainerInvoice('${c.id}', 'print')" ${nextMonth ? '' : 'disabled'}>Generate</button>
+              <button class="btn btn-ghost btn-sm" onclick="generateNextRetainerInvoice('${c.id}', 'email')" ${nextMonth ? '' : 'disabled'}>Email</button>
+            </td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`;
 }
 
 // ── OneDrive Sync ──────────────────────────────────────
