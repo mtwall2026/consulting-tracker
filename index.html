@@ -2042,6 +2042,7 @@ function emailInvoice(explicitClientId, explicitMonth) {
           ? `HOURLY SUBTOTAL (before retainer): ${fmtMoney(billing.hourlyAmount)}`
           : null,
         `RETAINER FEE (${billing.months} mo${billing.months !== 1 ? 's' : ''} × ${fmtMoney(billing.fee / (billing.months || 1))}): ${fmtMoney(billing.fee)}`,
+        `  Includes ${client.retainerHours || 0}h/mo, overage billed at ${fmtMoney(client.overageRate || client.rate)}/hr`,
         billing.overageHours > 0
           ? `OVERAGE (${billing.overageHours.toFixed(2)}h @ ${fmtMoney(billing.overageRate)}/hr): ${fmtMoney(billing.overageAmount)}`
           : null,
@@ -2166,7 +2167,7 @@ function confirmInvoice(explicitClientId, explicitMonth) {
         <td>${fmtMoney(billing.hourlyAmount)}</td>
       </tr>` : ''}
       <tr>
-        <td colspan="7">Retainer Fee (${billing.months} mo${billing.months !== 1 ? 's' : ''} × ${fmtMoney(billing.fee / (billing.months || 1))})</td>
+        <td colspan="7">Retainer Fee (${billing.months} mo${billing.months !== 1 ? 's' : ''} × ${fmtMoney(billing.fee / (billing.months || 1))})<br><span style="font-size:0.78rem;color:#777;font-weight:400">Includes ${client.retainerHours || 0}h/mo, overage billed at ${fmtMoney(client.overageRate || client.rate)}/hr</span></td>
         <td>${fmtMoney(billing.fee)}</td>
       </tr>${billing.overageHours > 0 ? `
       <tr>
@@ -2301,37 +2302,223 @@ function removeRetainerStatus() {
   save(); render();
 }
 
-// Walks forward one calendar month at a time from a retainer client's
-// start date, returning the first month that doesn't already have an
-// invoice number assigned — i.e. the next one due. Returns null once
-// everything through the current month has already been invoiced, or if
-// no start date has been set yet (can't determine a sequence without one).
-function findNextUnbilledMonth(client) {
+// Fee invoices are due at the START of each month — the flat fee is owed
+// regardless of hours, so it doesn't wait on anything. Walks forward one
+// calendar month at a time from the retainer start date, returning the
+// first month without a "-fee" invoice number yet. Null once everything
+// through the current month is invoiced, or no start date is set.
+function findNextUnbilledFeeMonth(client) {
   if (!client || client.billingType !== 'retainer' || !client.retainerStartDate) return null;
   const currentMonth = new Date().toISOString().slice(0, 7);
   let [y, m] = client.retainerStartDate.slice(0, 7).split('-').map(Number);
   const invoiceNumbers = state.invoiceNumbers || {};
   while (true) {
     const monthStr = `${y}-${String(m).padStart(2, '0')}`;
-    if (!invoiceNumbers[`${client.id}-${monthStr}`]) return monthStr;
+    if (!invoiceNumbers[`${client.id}-${monthStr}-fee`]) return monthStr;
     if (monthStr >= currentMonth) return null;
     m++; if (m > 12) { m = 1; y++; }
   }
 }
 
-function generateNextRetainerInvoice(clientId, mode) {
+// Overage invoices are only meaningful once a month is fully over (so all
+// its hours are known) and only if hours actually exceeded the allotment —
+// a month with no overage is simply skipped, never invoiced.
+function findNextUnbilledOverageMonth(client) {
+  if (!client || client.billingType !== 'retainer' || !client.retainerStartDate) return null;
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  let [y, m] = client.retainerStartDate.slice(0, 7).split('-').map(Number);
+  const invoiceNumbers = state.invoiceNumbers || {};
+  while (true) {
+    const monthStr = `${y}-${String(m).padStart(2, '0')}`;
+    if (monthStr >= currentMonth) return null; // this month hasn't finished yet
+    if (!invoiceNumbers[`${client.id}-${monthStr}-overage`]) {
+      const hours = state.entries
+        .filter(e => e.clientId === client.id && e.date.startsWith(monthStr) && isEntryUnderRetainer(client, e))
+        .reduce((s, e) => s + e.minutes, 0) / 60;
+      if (Math.max(0, hours - (client.retainerHours || 0)) > 0) return monthStr;
+    }
+    m++; if (m > 12) { m = 1; y++; }
+  }
+}
+
+function getOrAssignInvoiceNumber(key) {
+  if (!state.nextInvoiceNum) state.nextInvoiceNum = 1001;
+  if (!state.invoiceNumbers) state.invoiceNumbers = {};
+  if (!state.invoiceNumbers[key]) {
+    state.invoiceNumbers[key] = `INV-${state.nextInvoiceNum}`;
+    state.nextInvoiceNum++;
+    save();
+  }
+  return state.invoiceNumbers[key];
+}
+
+const INVOICE_STYLE = `
+    body { font-family: 'Segoe UI', sans-serif; color: #111; padding: 40px; max-width: 800px; margin: 0 auto; }
+    .invoice-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 32px; border-bottom: 2px solid #111; padding-bottom: 20px; }
+    .invoice-header img { height: 70px; width: auto; }
+    .company { text-align: right; }
+    .company h2 { font-size: 1.3rem; margin: 0 0 4px; }
+    .company p { color: #555; font-size: 0.85rem; margin: 0; }
+    h1 { font-size: 1.4rem; margin: 0 0 4px; }
+    h2.section { font-size: 1.05rem; margin: 28px 0 10px; }
+    .meta { color: #555; font-size: 0.9rem; margin-bottom: 24px; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    th { text-align: left; padding: 8px 10px; border-bottom: 2px solid #111; font-weight: 600; }
+    td { padding: 8px 10px; border-bottom: 1px solid #ddd; }
+    .total-row td { border-top: 2px solid #111; border-bottom: none; font-weight: 700; font-size: 1rem; }
+    .fee-box { background: #f6f6f6; border-radius: 8px; padding: 20px 24px; margin-top: 20px; }
+    .fee-box .amount { font-size: 1.6rem; font-weight: 800; }
+    .fee-box .note { color: #555; font-size: 0.85rem; margin-top: 6px; }
+    .grand-total { text-align: right; margin-top: 24px; font-size: 1.2rem; font-weight: 800; }
+    @media print { body { padding: 20px; } }`;
+
+function invoiceHeaderHtml(clientName, invoiceNum, subtitle) {
+  return `
+  <div class="invoice-header">
+    <img src="https://mtwall2026.github.io/consulting-tracker/logo.png" alt="Cirrobound Solutions" />
+    <div class="company">
+      <h2>Cirrobound Solutions</h2>
+      <p>${subtitle}</p>
+    </div>
+  </div>
+  <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:6px">
+    <h1 style="margin:0">Invoice — ${clientName}</h1>
+    <span style="font-size:1rem;font-weight:700;color:#333">${invoiceNum}</span>
+  </div>`;
+}
+
+function generateFeeInvoice(clientId, month, mode) {
   const client = state.clients.find(c => c.id === clientId);
   if (!client) return;
-  const month = findNextUnbilledMonth(client);
+  const invoiceNum = getOrAssignInvoiceNumber(`${clientId}-${month}-fee`);
+  const monthLabel = new Date(month + '-02').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  const dateGenerated = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  const fee = client.retainerAmount || 0;
+  const planNote = `Includes ${client.retainerHours || 0}h/mo, overage billed at ${fmtMoney(client.overageRate || client.rate)}/hr`;
+
+  if (mode === 'email') {
+    const body = [
+      'CONSULTING INVOICE — RETAINER FEE', '==================================', '',
+      `Invoice #:   ${invoiceNum}`, `Client:      ${client.name}`, `Period:      ${monthLabel}`, `Generated:   ${dateGenerated}`, '',
+      `RETAINER FEE: ${fmtMoney(fee)}`, `  ${planNote}`, '',
+      `GRAND TOTAL:  ${fmtMoney(fee)}`, '', '--', 'Cirrobound Solutions',
+    ].join('\n');
+    window.location.href = `mailto:?subject=${encodeURIComponent(`${invoiceNum} – ${client.name} – ${monthLabel} Retainer Fee`)}&body=${encodeURIComponent(body)}`;
+  } else {
+    const win = window.open('', '_blank');
+    win.document.write(`<!DOCTYPE html><html><head><title>Invoice – ${client.name}</title><style>${INVOICE_STYLE}</style></head><body>
+    ${invoiceHeaderHtml(client.name, invoiceNum, 'Consulting Invoice — Retainer Fee')}
+    <p class="meta">${monthLabel} &nbsp;·&nbsp; ${dateGenerated}</p>
+    <div class="fee-box">
+      <div class="amount">${fmtMoney(fee)}</div>
+      <div class="note">Monthly Retainer Fee — ${planNote}</div>
+    </div>
+    <div class="grand-total">Grand Total: ${fmtMoney(fee)}</div>
+    <script>window.onload = () => { window.print(); }<\/script>
+    </body></html>`);
+    win.document.close();
+  }
+  renderRetainersList();
+}
+
+function generateOverageInvoice(clientId, month, mode) {
+  const client = state.clients.find(c => c.id === clientId);
+  if (!client) return;
+  let entries = state.entries.filter(e => e.clientId === clientId && e.date.startsWith(month) && isEntryUnderRetainer(client, e));
+  entries = [...entries].sort((a, b) => a.date.localeCompare(b.date));
+  let expenses = state.expenses.filter(e => e.clientId === clientId && e.date.startsWith(month));
+  expenses = [...expenses].sort((a, b) => a.date.localeCompare(b.date));
+
+  const hours = entries.reduce((s, e) => s + e.minutes, 0) / 60;
+  const includedHours = client.retainerHours || 0;
+  const overageRate = client.overageRate || client.rate;
+  const overageHours = Math.max(0, hours - includedHours);
+  const overageAmount = overageHours * overageRate;
+  const expensesTotal = expenses.reduce((s, e) => s + e.amount, 0);
+  const grandTotal = overageAmount + expensesTotal;
+
+  const invoiceNum = getOrAssignInvoiceNumber(`${clientId}-${month}-overage`);
+  const monthLabel = new Date(month + '-02').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  const dateGenerated = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+
+  if (mode === 'email') {
+    const COL_W = [12, 8, 18, 12, 20, 8];
+    const padR = (s, w) => String(s).slice(0, w).padEnd(w);
+    const headerRow = [padR('Date', COL_W[0]), padR('Time', COL_W[1]), padR('Event', COL_W[2]), padR('Location', COL_W[3]), padR('Description', COL_W[4]), padR('Duration', COL_W[5])].join('  ');
+    const divider = '-'.repeat(headerRow.length);
+    const entryRows = entries.map(e => [padR(fmtDate(e.date), COL_W[0]), padR(e.time || '—', COL_W[1]), padR(e.note || '—', COL_W[2]), padR(e.location || '—', COL_W[3]), padR(e.noteText || '—', COL_W[4]), padR(fmtDur(e.minutes), COL_W[5])].join('  ')).join('\n');
+    const expenseLines = expenses.length ? [
+      '', 'EXPENSES',
+      ...expenses.map(e => `  ${fmtDate(e.date)}  ${e.category}  ${e.description || '—'}  ${fmtMoney(e.amount)}`),
+      `EXPENSES SUBTOTAL: ${fmtMoney(expensesTotal)}`,
+    ].join('\n') : '';
+    const body = [
+      'CONSULTING INVOICE — RETAINER OVERAGE', '======================================', '',
+      `Invoice #:   ${invoiceNum}`, `Client:      ${client.name}`, `Period:      ${monthLabel}`, `Generated:   ${dateGenerated}`, '',
+      divider, headerRow, divider, entryRows, divider, '',
+      `TOTAL HOURS:      ${hours.toFixed(2)}h (${includedHours}h included)`,
+      `OVERAGE:          ${overageHours.toFixed(2)}h @ ${fmtMoney(overageRate)}/hr = ${fmtMoney(overageAmount)}`,
+      expenseLines, '',
+      `GRAND TOTAL:      ${fmtMoney(grandTotal)}`, '', '--', 'Cirrobound Solutions',
+    ].join('\n');
+    window.location.href = `mailto:?subject=${encodeURIComponent(`${invoiceNum} – ${client.name} – ${monthLabel} Overage`)}&body=${encodeURIComponent(body)}`;
+  } else {
+    const rows = entries.map(e => `
+      <tr>
+        <td>${fmtDate(e.date)}</td><td>${e.time || '—'}</td><td>${e.note || '—'}</td>
+        <td>${e.location || '—'}</td><td>${e.noteText || '—'}</td><td>${fmtDur(e.minutes)}</td>
+      </tr>`).join('');
+    const expenseRows = expenses.map(e => `
+      <tr><td>${fmtDate(e.date)}</td><td>${e.category}</td><td>${e.description || '—'}</td><td>${fmtMoney(e.amount)}</td></tr>`).join('');
+    const win = window.open('', '_blank');
+    win.document.write(`<!DOCTYPE html><html><head><title>Invoice – ${client.name}</title><style>${INVOICE_STYLE}</style></head><body>
+    ${invoiceHeaderHtml(client.name, invoiceNum, 'Consulting Invoice — Retainer Overage')}
+    <p class="meta">${monthLabel} &nbsp;·&nbsp; ${hours.toFixed(1)}h logged (${includedHours}h included) &nbsp;·&nbsp; ${dateGenerated}</p>
+    <table>
+      <thead><tr><th>Date</th><th>Time</th><th>Event</th><th>Location</th><th>Description</th><th>Duration</th></tr></thead>
+      <tbody>${rows}
+        <tr class="total-row">
+          <td colspan="5">Overage (${overageHours.toFixed(2)}h @ ${fmtMoney(overageRate)}/hr)</td>
+          <td>${fmtMoney(overageAmount)}</td>
+        </tr>
+      </tbody>
+    </table>
+    ${expenses.length ? `
+    <h2 class="section">Expenses</h2>
+    <table>
+      <thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Amount</th></tr></thead>
+      <tbody>${expenseRows}
+        <tr class="total-row"><td colspan="3">Expenses Subtotal</td><td>${fmtMoney(expensesTotal)}</td></tr>
+      </tbody>
+    </table>` : ''}
+    <div class="grand-total">Grand Total: ${fmtMoney(grandTotal)}</div>
+    <script>window.onload = () => { window.print(); }<\/script>
+    </body></html>`);
+    win.document.close();
+  }
+  renderRetainersList();
+}
+
+function generateFeeInvoiceForClient(clientId, mode) {
+  const client = state.clients.find(c => c.id === clientId);
+  if (!client) return;
+  const month = findNextUnbilledFeeMonth(client);
   if (!month) {
-    alert(client.retainerStartDate
-      ? 'Already caught up — nothing new to invoice yet.'
-      : 'Set a retainer start date first so the next invoice period can be determined.');
+    alert(client.retainerStartDate ? 'Fee invoices are all caught up.' : 'Set a retainer start date first.');
     return;
   }
-  if (mode === 'email') emailInvoice(clientId, month);
-  else confirmInvoice(clientId, month);
-  renderRetainersList();
+  generateFeeInvoice(clientId, month, mode);
+}
+
+function generateOverageInvoiceForClient(clientId, mode) {
+  const client = state.clients.find(c => c.id === clientId);
+  if (!client) return;
+  const month = findNextUnbilledOverageMonth(client);
+  if (!month) {
+    alert('No overage invoice due right now — either the month isn\'t finished yet, or there was no overage.');
+    return;
+  }
+  generateOverageInvoice(clientId, month, mode);
 }
 
 function renderRetainersList() {
@@ -2341,11 +2528,12 @@ function renderRetainersList() {
   if (!retainerClients.length) { body.innerHTML = '<p class="empty">No retainer clients yet — set one up above.</p>'; return; }
 
   const currentMonth = new Date().toISOString().slice(0, 7);
+  const monthLabel = m => new Date(m + '-02').toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
   body.innerHTML = `
     <table>
       <thead><tr>
         <th>Client</th><th>Retainer</th><th>Included</th><th>Overage Rate</th>
-        <th>Starts</th><th>This Month</th><th>Next Invoice</th><th></th>
+        <th>Starts</th><th>This Month</th><th>Fee Invoice</th><th>Overage Invoice</th>
       </tr></thead>
       <tbody>
         ${retainerClients.map(c => {
@@ -2354,7 +2542,8 @@ function renderRetainersList() {
             .reduce((s, e) => s + e.minutes, 0) / 60;
           const included = c.retainerHours || 0;
           const over = Math.max(0, hoursThisMonth - included);
-          const nextMonth = findNextUnbilledMonth(c);
+          const feeMonth = findNextUnbilledFeeMonth(c);
+          const overageMonth = findNextUnbilledOverageMonth(c);
           return `
           <tr>
             <td><span class="badge">${c.name}</span></td>
@@ -2363,10 +2552,19 @@ function renderRetainersList() {
             <td>${fmtMoney(c.overageRate || c.rate)}/hr</td>
             <td>${c.retainerStartDate ? fmtDate(c.retainerStartDate) : '—'}</td>
             <td>${hoursThisMonth.toFixed(1)}h${over > 0 ? ` <span style="color:var(--danger)">(+${over.toFixed(1)}h over)</span>` : ''}</td>
-            <td>${nextMonth ? new Date(nextMonth + '-02').toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : '<span style="color:var(--muted)">All caught up</span>'}</td>
-            <td style="display:flex;gap:6px">
-              <button class="btn btn-primary btn-sm" onclick="generateNextRetainerInvoice('${c.id}', 'print')" ${nextMonth ? '' : 'disabled'}>Generate</button>
-              <button class="btn btn-ghost btn-sm" onclick="generateNextRetainerInvoice('${c.id}', 'email')" ${nextMonth ? '' : 'disabled'}>Email</button>
+            <td>
+              <div style="margin-bottom:6px">${feeMonth ? monthLabel(feeMonth) : '<span style="color:var(--muted)">Caught up</span>'}</div>
+              <div style="display:flex;gap:6px">
+                <button class="btn btn-primary btn-sm" onclick="generateFeeInvoiceForClient('${c.id}', 'print')" ${feeMonth ? '' : 'disabled'}>Generate</button>
+                <button class="btn btn-ghost btn-sm" onclick="generateFeeInvoiceForClient('${c.id}', 'email')" ${feeMonth ? '' : 'disabled'}>Email</button>
+              </div>
+            </td>
+            <td>
+              <div style="margin-bottom:6px">${overageMonth ? monthLabel(overageMonth) : '<span style="color:var(--muted)">None due</span>'}</div>
+              <div style="display:flex;gap:6px">
+                <button class="btn btn-primary btn-sm" onclick="generateOverageInvoiceForClient('${c.id}', 'print')" ${overageMonth ? '' : 'disabled'}>Generate</button>
+                <button class="btn btn-ghost btn-sm" onclick="generateOverageInvoiceForClient('${c.id}', 'email')" ${overageMonth ? '' : 'disabled'}>Email</button>
+              </div>
             </td>
           </tr>`;
         }).join('')}
