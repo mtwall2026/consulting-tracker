@@ -1955,9 +1955,20 @@ async function refreshTeamSharedList() {
     teamSharedItems = (data.value || [])
       .filter(function(it) { return it.name === OD_FILE && it.remoteItem; })
       .map(function(it) {
-        var owner = it.remoteItem.shared && it.remoteItem.shared.owner && it.remoteItem.shared.owner.user;
+        // Every teammate's file has the same filename (each lives in their
+        // own drive), so the filename itself is useless as a label and
+        // ambiguous with more than one teammate sharing. Prefer an actual
+        // email/UPN over a display name over the (non-distinguishing) filename.
+        var owner = (it.remoteItem.shared && it.remoteItem.shared.owner && it.remoteItem.shared.owner.user) || {};
+        var createdBy = (it.remoteItem.createdBy && it.remoteItem.createdBy.user) || {};
+        var modifiedBy = (it.remoteItem.lastModifiedBy && it.remoteItem.lastModifiedBy.user) || {};
+        var label = owner.email || owner.userPrincipalName
+          || createdBy.email || createdBy.userPrincipalName
+          || modifiedBy.email || modifiedBy.userPrincipalName
+          || owner.displayName || createdBy.displayName || modifiedBy.displayName
+          || ('Shared file (' + it.id.slice(-6) + ')');
         return {
-          label: (owner && (owner.displayName || owner.email)) || it.name,
+          label: label,
           driveId: it.remoteItem.parentReference.driveId,
           itemId: it.remoteItem.id
         };
