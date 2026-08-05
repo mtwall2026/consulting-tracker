@@ -38,6 +38,17 @@
     header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
     .subtitle { color: var(--muted); font-size: 0.85rem; }
 
+    /* ── Page tabs ── */
+    .view-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); }
+    .view-tab {
+      background: none; border: none; cursor: pointer;
+      color: var(--muted); font-size: 0.95rem; font-weight: 600;
+      padding: 10px 18px; border-bottom: 2px solid transparent;
+      transition: color .15s, border-color .15s;
+    }
+    .view-tab:hover { color: var(--text); }
+    .view-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
     .card {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -303,7 +314,14 @@
     </div>
   </header>
 
-  <!-- Team View (manager account only) -->
+  <!-- Page tabs -->
+  <div class="view-tabs">
+    <button class="view-tab active" id="tabTimeTracking" onclick="switchView('timeTracking')">Time Tracking</button>
+    <button class="view-tab" id="tabExpenses" onclick="switchView('expenses')">Expenses</button>
+  </div>
+
+  <!-- Team View (manager account only) — visible on either tab, since it
+       controls whose data you're looking at, not which section -->
   <div class="card" id="teamViewCard" style="display:none">
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
       <h2 style="margin:0">Team View</h2>
@@ -314,6 +332,9 @@
       <span id="teamViewBanner" style="display:none;color:var(--accent2);font-size:0.85rem;font-weight:600">&#128065; Viewing read-only &mdash; no changes here are saved</span>
     </div>
   </div>
+
+  <!-- ══════════════ Time Tracking page ══════════════ -->
+  <div id="viewTimeTracking">
 
   <!-- Clients -->
   <div class="card">
@@ -397,51 +418,6 @@
     <div class="summary-grid" id="summaryGrid"></div>
   </div>
 
-  <!-- Expenses -->
-  <div class="card" id="expensesCard">
-    <h2>Expenses</h2>
-    <div class="manual-row" id="addExpenseRow">
-      <label>Client
-        <select id="expenseClient"><option value="">— General —</option></select>
-      </label>
-      <label>Date
-        <input type="date" id="expenseDate" />
-      </label>
-      <label>Category
-        <select id="expenseCategory">
-          <option value="Travel">Travel</option>
-          <option value="Mileage">Mileage</option>
-          <option value="Meals">Meals &amp; Entertainment</option>
-          <option value="Software">Software/Subscriptions</option>
-          <option value="Materials">Materials/Supplies</option>
-          <option value="Office">Office</option>
-          <option value="Other">Other</option>
-        </select>
-      </label>
-      <label>Amount
-        <input type="number" id="expenseAmount" placeholder="0.00" min="0" step="0.01" style="width:100px" />
-      </label>
-      <label>Description
-        <input id="expenseDescription" placeholder="Optional description" style="width:170px" />
-      </label>
-      <button class="btn btn-primary" onclick="addExpense()" style="align-self:flex-end">+ Log Expense</button>
-    </div>
-    <div class="log-header" style="margin-top:16px">
-      <h2 style="margin-bottom:0;font-size:0.95rem">Expense Log</h2>
-      <div class="filter-row">
-        <select id="filterExpenseClient" onchange="renderExpenseLog()"><option value="">All clients</option></select>
-        <select id="filterExpenseMonth" onchange="onFilterExpenseMonthChange()"><option value="">All Months</option></select>
-      </div>
-    </div>
-    <div id="expenseLogBody"></div>
-    <div class="summary-grid" id="expenseSummaryGrid" style="margin-top:14px"></div>
-    <div class="export-row" style="margin-top:14px">
-      <button class="btn btn-ghost btn-sm" id="btnExportExpensesCSV" onclick="exportExpensesCSV()">Export Expenses CSV</button>
-      <button class="btn btn-ghost btn-sm" id="btnImportExpensesCSVBtn" onclick="document.getElementById('importExpensesCSVFile').click()">Import Expenses CSV</button>
-      <input type="file" id="importExpensesCSVFile" accept=".csv" style="display:none" onchange="importExpensesCSV(event)" />
-    </div>
-  </div>
-
   <!-- Charts -->
   <div class="card" id="chartsCard">
     <h2>Charts</h2>
@@ -471,6 +447,86 @@
     <div class="cal-grid" id="calGrid"></div>
   </div>
 
+  </div> <!-- /viewTimeTracking -->
+
+  <!-- ══════════════ Expenses page ══════════════ -->
+  <div id="viewExpenses" style="display:none">
+
+  <!-- Add Expense -->
+  <div class="card">
+    <h2>Add Expense</h2>
+    <div class="manual-row" id="addExpenseRow">
+      <label>Client
+        <select id="expenseClient"><option value="">— General —</option></select>
+      </label>
+      <label>Date
+        <input type="date" id="expenseDate" />
+      </label>
+      <label>Category
+        <select id="expenseCategory">
+          <option value="Travel">Travel</option>
+          <option value="Mileage">Mileage</option>
+          <option value="Meals">Meals &amp; Entertainment</option>
+          <option value="Software">Software/Subscriptions</option>
+          <option value="Materials">Materials/Supplies</option>
+          <option value="Office">Office</option>
+          <option value="Other">Other</option>
+        </select>
+      </label>
+      <label>Amount
+        <input type="number" id="expenseAmount" placeholder="0.00" min="0" step="0.01" style="width:100px" />
+      </label>
+      <label>Description
+        <input id="expenseDescription" placeholder="Optional description" style="width:170px" />
+      </label>
+      <button class="btn btn-primary" onclick="addExpense()" style="align-self:flex-end">+ Log Expense</button>
+    </div>
+  </div>
+
+  <!-- Expense Log -->
+  <div class="card">
+    <div class="log-header">
+      <h2 style="margin-bottom:0">Expense Log</h2>
+      <div class="filter-row">
+        <select id="filterExpenseClient" onchange="renderExpenseLog()"><option value="">All clients</option></select>
+        <select id="filterExpenseMonth" onchange="onFilterExpenseMonthChange()"><option value="">All Months</option></select>
+      </div>
+    </div>
+    <div id="expenseLogBody"></div>
+    <div class="export-row" style="margin-top:14px">
+      <button class="btn btn-ghost btn-sm" id="btnExportExpensesCSV" onclick="exportExpensesCSV()">Export Expenses CSV</button>
+      <button class="btn btn-ghost btn-sm" id="btnImportExpensesCSVBtn" onclick="document.getElementById('importExpensesCSVFile').click()">Import Expenses CSV</button>
+      <input type="file" id="importExpensesCSVFile" accept=".csv" style="display:none" onchange="importExpensesCSV(event)" />
+    </div>
+  </div>
+
+  <!-- Expense Summary -->
+  <div class="card">
+    <h2>Summary</h2>
+    <div class="summary-grid" id="expenseSummaryGrid"></div>
+  </div>
+
+  <!-- Expense Charts -->
+  <div class="card">
+    <h2>Charts</h2>
+    <div class="charts-grid">
+      <div class="chart-box">
+        <h3>Expenses per Month (Last 6)</h3>
+        <canvas id="chartExpensesMonth"></canvas>
+      </div>
+      <div class="chart-box">
+        <h3>Expenses by Category</h3>
+        <canvas id="chartExpenseCategoryDoughnut"></canvas>
+      </div>
+      <div class="chart-box">
+        <h3>Expenses by Client</h3>
+        <canvas id="chartExpenseClientDoughnut"></canvas>
+      </div>
+    </div>
+  </div>
+
+  </div> <!-- /viewExpenses -->
+
 </div>
 
 <script>
@@ -485,10 +541,26 @@ let timerSegmentStart = null; // Date.now() when the current running segment beg
 let chartHoursMonthInst = null;
 let chartRevenueMonthInst = null;
 let chartClientDoughnutInst = null;
+let chartExpensesMonthInst = null;
+let chartExpenseCategoryDoughnutInst = null;
+let chartExpenseClientDoughnutInst = null;
 
 // Calendar state
 let calYear = new Date().getFullYear();
 let calMonth = new Date().getMonth(); // 0-based
+
+// ── Page tabs ────────────────────────────────────────
+let currentView = 'timeTracking';
+function switchView(view) {
+  currentView = view;
+  document.getElementById('viewTimeTracking').style.display = view === 'timeTracking' ? '' : 'none';
+  document.getElementById('viewExpenses').style.display = view === 'expenses' ? '' : 'none';
+  document.getElementById('tabTimeTracking').classList.toggle('active', view === 'timeTracking');
+  document.getElementById('tabExpenses').classList.toggle('active', view === 'expenses');
+  // Chart.js can't size a canvas correctly while its container is
+  // display:none, so redraw whichever page's charts just became visible.
+  if (view === 'timeTracking') renderCharts(); else renderExpenseCharts();
+}
 
 // ── Team View (manager account only) ───────────────────
 // Read-only view of a teammate's data, loaded live from their OneDrive
@@ -608,11 +680,14 @@ function render() {
   renderMonthFilter();
   renderLog();
   renderSummary();
-  renderCharts();
   renderCalendar();
   renderExpenseMonthFilter();
   renderExpenseLog();
   renderExpenseSummary();
+  // Chart.js can't size a canvas correctly while its container is
+  // display:none, so only (re)build charts for the currently visible
+  // page — switchView() renders the other page's charts on demand.
+  if (currentView === 'timeTracking') renderCharts(); else renderExpenseCharts();
 }
 
 // Hides/disables every control that mutates data while viewing a
@@ -1360,6 +1435,163 @@ function renderCharts() {
               label: ctx => ` ${ctx.label}: ${ctx.parsed.toFixed(1)}h`
             }
           }
+        }
+      }
+    });
+  }
+}
+
+function renderExpenseCharts() {
+  const filterMonth = document.getElementById('filterExpenseMonth').value;
+
+  let last6;
+  if (filterMonth) {
+    const [fy, fm] = filterMonth.split('-').map(Number);
+    last6 = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(fy, fm - 1 - i, 1);
+      last6.push(d.toISOString().slice(0, 7));
+    }
+  } else {
+    last6 = getLast6Months();
+  }
+
+  const labels = last6.map(m => {
+    const d = new Date(m + '-02');
+    return d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+  });
+
+  const amountData = last6.map(m => {
+    return +activeState().expenses
+      .filter(e => e.date.startsWith(m))
+      .reduce((s, e) => s + e.amount, 0)
+      .toFixed(2);
+  });
+
+  const filteredExpenses = filterMonth
+    ? activeState().expenses.filter(e => e.date.startsWith(filterMonth))
+    : activeState().expenses;
+
+  const categoryTotals = {};
+  filteredExpenses.forEach(e => {
+    categoryTotals[e.category] = (categoryTotals[e.category] || 0) + e.amount;
+  });
+  const categoryNames = Object.keys(categoryTotals);
+  const categoryVals = categoryNames.map(n => +categoryTotals[n].toFixed(2));
+
+  const clientTotals = {};
+  filteredExpenses.forEach(e => {
+    const label = e.clientName || 'General';
+    clientTotals[label] = (clientTotals[label] || 0) + e.amount;
+  });
+  const expClientNames = Object.keys(clientTotals);
+  const expClientVals = expClientNames.map(n => +clientTotals[n].toFixed(2));
+
+  const PALETTE = [
+    '#4f8ef7','#6ee7b7','#f87171','#fbbf24','#a78bfa',
+    '#38bdf8','#34d399','#fb923c','#e879f9','#facc15'
+  ];
+
+  const chartDefaults = {
+    responsive: true,
+    maintainAspectRatio: true,
+    plugins: {
+      legend: { labels: { color: '#e2e8f0', font: { size: 11 } } },
+      tooltip: { callbacks: {} }
+    }
+  };
+
+  // ── Expenses per month bar chart ──
+  if (chartExpensesMonthInst) { chartExpensesMonthInst.destroy(); chartExpensesMonthInst = null; }
+  const ctxE = document.getElementById('chartExpensesMonth').getContext('2d');
+  chartExpensesMonthInst = new Chart(ctxE, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Expenses ($)',
+        data: amountData,
+        backgroundColor: '#f87171aa',
+        borderColor: '#f87171',
+        borderWidth: 2,
+        borderRadius: 4,
+      }]
+    },
+    options: {
+      ...chartDefaults,
+      scales: {
+        x: { ticks: { color: '#64748b' }, grid: { color: '#2e3350' } },
+        y: {
+          ticks: { color: '#64748b', callback: v => '$' + v.toLocaleString() },
+          grid: { color: '#2e3350' },
+          beginAtZero: true
+        }
+      },
+      plugins: { ...chartDefaults.plugins, legend: { display: false } }
+    }
+  });
+
+  // ── Expenses by category doughnut ──
+  if (chartExpenseCategoryDoughnutInst) { chartExpenseCategoryDoughnutInst.destroy(); chartExpenseCategoryDoughnutInst = null; }
+  const ctxCat = document.getElementById('chartExpenseCategoryDoughnut').getContext('2d');
+  if (categoryNames.length === 0) {
+    ctxCat.clearRect(0, 0, ctxCat.canvas.width, ctxCat.canvas.height);
+    ctxCat.fillStyle = '#64748b';
+    ctxCat.font = '14px Segoe UI, system-ui, sans-serif';
+    ctxCat.textAlign = 'center';
+    ctxCat.fillText('No data', ctxCat.canvas.width / 2, ctxCat.canvas.height / 2);
+  } else {
+    chartExpenseCategoryDoughnutInst = new Chart(ctxCat, {
+      type: 'doughnut',
+      data: {
+        labels: categoryNames,
+        datasets: [{
+          data: categoryVals,
+          backgroundColor: PALETTE.slice(0, categoryNames.length).map(c => c + 'cc'),
+          borderColor: PALETTE.slice(0, categoryNames.length),
+          borderWidth: 2,
+          hoverOffset: 6,
+        }]
+      },
+      options: {
+        ...chartDefaults,
+        cutout: '60%',
+        plugins: {
+          legend: { position: 'bottom', labels: { color: '#e2e8f0', font: { size: 11 }, padding: 10 } },
+          tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${fmtMoney(ctx.parsed)}` } }
+        }
+      }
+    });
+  }
+
+  // ── Expenses by client doughnut ──
+  if (chartExpenseClientDoughnutInst) { chartExpenseClientDoughnutInst.destroy(); chartExpenseClientDoughnutInst = null; }
+  const ctxCli = document.getElementById('chartExpenseClientDoughnut').getContext('2d');
+  if (expClientNames.length === 0) {
+    ctxCli.clearRect(0, 0, ctxCli.canvas.width, ctxCli.canvas.height);
+    ctxCli.fillStyle = '#64748b';
+    ctxCli.font = '14px Segoe UI, system-ui, sans-serif';
+    ctxCli.textAlign = 'center';
+    ctxCli.fillText('No data', ctxCli.canvas.width / 2, ctxCli.canvas.height / 2);
+  } else {
+    chartExpenseClientDoughnutInst = new Chart(ctxCli, {
+      type: 'doughnut',
+      data: {
+        labels: expClientNames,
+        datasets: [{
+          data: expClientVals,
+          backgroundColor: PALETTE.slice(0, expClientNames.length).map(c => c + 'cc'),
+          borderColor: PALETTE.slice(0, expClientNames.length),
+          borderWidth: 2,
+          hoverOffset: 6,
+        }]
+      },
+      options: {
+        ...chartDefaults,
+        cutout: '60%',
+        plugins: {
+          legend: { position: 'bottom', labels: { color: '#e2e8f0', font: { size: 11 }, padding: 10 } },
+          tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${fmtMoney(ctx.parsed)}` } }
         }
       }
     });
