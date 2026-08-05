@@ -343,7 +343,17 @@
     <div class="add-client-row" id="addClientRow">
       <input id="newClientName" placeholder="Client name (e.g. Century 3)" maxlength="40" />
       <select id="newClientRate"></select>
-      <button class="btn btn-primary" onclick="addClient()">+ Add Client</button>
+      <select id="newClientBillingType" onchange="updateClientFormMode()">
+        <option value="hourly">Hourly</option>
+        <option value="retainer">Retainer</option>
+      </select>
+      <span id="retainerFieldsWrap" style="display:none">
+        <input type="number" id="newClientRetainerAmount" placeholder="Retainer $/mo" min="0" step="1" style="width:130px" />
+        <input type="number" id="newClientRetainerHours" placeholder="Included hrs" min="0" step="0.5" style="width:110px" />
+        <input type="number" id="newClientOverageRate" placeholder="Overage $/hr (opt.)" min="0" step="1" style="width:160px" />
+      </span>
+      <button class="btn btn-primary" id="btnAddClient" onclick="addClient()">+ Add Client</button>
+      <button class="btn btn-ghost" id="btnCancelEditClient" onclick="cancelEditClient()" style="display:none">Cancel</button>
     </div>
   </div>
 
@@ -644,6 +654,40 @@ function roundTimerElapsed(ms) {
 }
 function calcAmount(minutes, rate) { return (minutes / 60) * rate; }
 function fmtMoney(n) { return '$' + n.toFixed(2); }
+
+// What a client owes for a set of entries (already filtered to that client
+// and whatever date range is relevant). Hourly clients: sum each entry's
+// own logged rate, unchanged from before retainers existed. Retainer
+// clients: a flat fee for every distinct calendar month that has at least
+// one entry, plus overage for hours beyond that month's included
+// allotment — this only charges months with logged activity, so invoicing
+// is expected to target a specific month (the app already works that way).
+function calcClientBilling(client, entries) {
+  if (!client || client.billingType !== 'retainer') {
+    return { isRetainer: false, amount: entries.reduce((s, e) => s + calcAmount(e.minutes, e.rate), 0) };
+  }
+  const overageRate = client.overageRate || client.rate;
+  const includedHours = client.retainerHours || 0;
+  const minutesByMonth = {};
+  entries.forEach(e => {
+    const m = e.date.slice(0, 7);
+    minutesByMonth[m] = (minutesByMonth[m] || 0) + e.minutes;
+  });
+  const months = Object.keys(minutesByMonth);
+  let fee = 0, overageHours = 0, overageAmount = 0;
+  months.forEach(m => {
+    fee += client.retainerAmount || 0;
+    const hrs = minutesByMonth[m] / 60;
+    const over = Math.max(0, hrs - includedHours);
+    overageHours += over;
+    overageAmount += over * overageRate;
+  });
+  return {
+    isRetainer: true, months: months.length, includedHours,
+    fee, overageHours, overageRate, overageAmount,
+    amount: fee + overageAmount
+  };
+}
 function fmtDate(iso) {
   const d = new Date(iso + 'T12:00:00');
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -738,9 +782,13 @@ function renderClients() {
   activeState().clients.forEach(c => {
     const div = document.createElement('div');
     div.className = 'client-chip' + (timerClientId === c.id ? ' active' : '');
+    const rateLabel = c.billingType === 'retainer'
+      ? `$${c.retainerAmount}/mo${c.retainerHours ? ` (${c.retainerHours}h incl.)` : ''}`
+      : `$${c.rate}/hr`;
     div.innerHTML = teamViewActive
-      ? `<span>${c.name}</span><span class="rate">$${c.rate}/hr</span>`
-      : `<span>${c.name}</span><span class="rate">$${c.rate}/hr</span>
+      ? `<span>${c.name}</span><span class="rate">${rateLabel}</span>`
+      : `<span>${c.name}</span><span class="rate">${rateLabel}</span>
+      <button class="del" title="Edit client" onclick="editClientPrompt('${c.id}')" style="color:var(--muted)">&#9998;</button>
       <button class="del" title="Delete client" onclick="deleteClient('${c.id}')">×</button>`;
     if (!teamViewActive) div.addEventListener('click', e => { if (!e.target.classList.contains('del')) selectClient(c.id); });
     grid.appendChild(div);
@@ -784,13 +832,65 @@ function renderClients() {
   if (filterExpenseClientPrev) filterExpenseClientEl.value = filterExpenseClientPrev;
 }
 
+// Which client's chip is currently being edited via the Add Client form
+// (null when the form is in "add new" mode).
+let editingClientId = null;
+
+function updateClientFormMode() {
+  const billingType = document.getElementById('newClientBillingType').value;
+  const wrap = document.getElementById('retainerFieldsWrap');
+  wrap.style.display = billingType === 'retainer' ? 'contents' : 'none';
+  document.getElementById('btnAddClient').textContent = editingClientId ? 'Update Client' : '+ Add Client';
+  document.getElementById('btnCancelEditClient').style.display = editingClientId ? '' : 'none';
+}
+
+function editClientPrompt(id) {
+  const c = state.clients.find(c => c.id === id);
+  if (!c) return;
+  editingClientId = id;
+  document.getElementById('newClientName').value = c.name;
+  document.getElementById('newClientRate').value = c.rate;
+  document.getElementById('newClientBillingType').value = c.billingType === 'retainer' ? 'retainer' : 'hourly';
+  document.getElementById('newClientRetainerAmount').value = c.retainerAmount || '';
+  document.getElementById('newClientRetainerHours').value = c.retainerHours || '';
+  document.getElementById('newClientOverageRate').value = c.overageRate || '';
+  updateClientFormMode();
+  document.getElementById('newClientName').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function cancelEditClient() {
+  editingClientId = null;
+  document.getElementById('newClientName').value = '';
+  document.getElementById('newClientRate').value = 200;
+  document.getElementById('newClientBillingType').value = 'hourly';
+  document.getElementById('newClientRetainerAmount').value = '';
+  document.getElementById('newClientRetainerHours').value = '';
+  document.getElementById('newClientOverageRate').value = '';
+  updateClientFormMode();
+}
+
 function addClient() {
   const name = document.getElementById('newClientName').value.trim();
   const rate = parseInt(document.getElementById('newClientRate').value);
+  const billingType = document.getElementById('newClientBillingType').value;
+  const retainerAmount = parseFloat(document.getElementById('newClientRetainerAmount').value) || 0;
+  const retainerHours = parseFloat(document.getElementById('newClientRetainerHours').value) || 0;
+  const overageRateInput = document.getElementById('newClientOverageRate').value;
+  const overageRate = overageRateInput ? parseFloat(overageRateInput) : rate;
+
   if (!name) { alert('Enter a client name.'); return; }
   if (!rate) { alert('Select a rate.'); return; }
-  state.clients.push({ id: uid(), name, rate });
-  document.getElementById('newClientName').value = '';
+  if (billingType === 'retainer' && (!retainerAmount || retainerAmount <= 0)) { alert('Enter a retainer amount.'); return; }
+
+  const clientData = { name, rate, billingType, retainerAmount, retainerHours, overageRate };
+
+  if (editingClientId) {
+    const idx = state.clients.findIndex(c => c.id === editingClientId);
+    if (idx !== -1) state.clients[idx] = { ...state.clients[idx], ...clientData };
+  } else {
+    state.clients.push({ id: uid(), ...clientData });
+  }
+  cancelEditClient();
   save(); render();
 }
 
@@ -798,6 +898,7 @@ function deleteClient(id) {
   if (!confirm('Delete this client? Their logged entries will remain.')) return;
   state.clients = state.clients.filter(c => c.id !== id);
   if (timerClientId === id) discardTimer();
+  if (editingClientId === id) cancelEditClient();
   save(); render();
 }
 
@@ -1243,13 +1344,21 @@ function renderSummary() {
   const entries = filterMonth ? activeState().entries.filter(e => e.date.startsWith(filterMonth)) : activeState().entries;
 
   const totalMin = entries.reduce((s, e) => s + e.minutes, 0);
-  const totalAmt = entries.reduce((s, e) => s + calcAmount(e.minutes, e.rate), 0);
 
   const byClient = {};
   entries.forEach(e => {
-    if (!byClient[e.clientId]) byClient[e.clientId] = { name: e.clientName, min: 0, amt: 0 };
+    if (!byClient[e.clientId]) byClient[e.clientId] = { name: e.clientName, min: 0, entries: [] };
     byClient[e.clientId].min += e.minutes;
-    byClient[e.clientId].amt += calcAmount(e.minutes, e.rate);
+    byClient[e.clientId].entries.push(e);
+  });
+
+  let totalAmt = 0;
+  Object.keys(byClient).forEach(cid => {
+    const client = activeState().clients.find(c => c.id === cid);
+    const billing = calcClientBilling(client, byClient[cid].entries);
+    byClient[cid].amt = billing.amount;
+    byClient[cid].isRetainer = billing.isRetainer;
+    totalAmt += billing.amount;
   });
 
   const grid = document.getElementById('summaryGrid');
@@ -1263,7 +1372,7 @@ function renderSummary() {
       <div class="summary-card">
         <div class="label">${c.name}</div>
         <div class="value">${fmtMoney(c.amt)}</div>
-        <div class="sub">${fmtDur(c.min)}</div>
+        <div class="sub">${fmtDur(c.min)}${c.isRetainer ? ' · Retainer' : ''}</div>
       </div>`).join('')}`;
 }
 
@@ -1879,7 +1988,8 @@ function emailInvoice() {
   expenses = [...expenses].sort((a, b) => a.date.localeCompare(b.date));
 
   const totalMin = entries.reduce((s, e) => s + e.minutes, 0);
-  const totalAmt = entries.reduce((s, e) => s + calcAmount(e.minutes, e.rate), 0);
+  const billing = calcClientBilling(client, entries);
+  const totalAmt = billing.amount;
   const expensesTotal = expenses.reduce((s, e) => s + e.amount, 0);
   const grandTotal = totalAmt + expensesTotal;
 
@@ -1913,9 +2023,19 @@ function emailInvoice() {
     padR(e.location || '—', COL_W[3]),
     padR(e.noteText || '—', COL_W[4]),
     padR(fmtDur(e.minutes), COL_W[5]),
-    padR('$' + e.rate + '/hr', COL_W[6]),
-    padR(fmtMoney(calcAmount(e.minutes, e.rate)), COL_W[7]),
+    padR(billing.isRetainer ? '—' : '$' + e.rate + '/hr', COL_W[6]),
+    padR(billing.isRetainer ? '—' : fmtMoney(calcAmount(e.minutes, e.rate)), COL_W[7]),
   ].join('  ')).join('\n');
+
+  const hoursSubtotalLines = billing.isRetainer
+    ? [
+        `RETAINER FEE (${billing.months} mo${billing.months !== 1 ? 's' : ''} × ${fmtMoney(billing.fee / (billing.months || 1))}): ${fmtMoney(billing.fee)}`,
+        billing.overageHours > 0
+          ? `OVERAGE (${billing.overageHours.toFixed(2)}h @ ${fmtMoney(billing.overageRate)}/hr): ${fmtMoney(billing.overageAmount)}`
+          : null,
+        `HOURS SUBTOTAL:  ${fmtMoney(totalAmt)}`,
+      ].filter(Boolean).join('\n')
+    : `HOURS SUBTOTAL:  ${fmtMoney(totalAmt)}`;
 
   const EXP_COL_W = [12, 16, 30, 12];
   const expenseHeaderRow = [
@@ -1960,7 +2080,7 @@ function emailInvoice() {
     divider,
     '',
     `TOTAL HOURS:     ${fmtDur(totalMin)}`,
-    `HOURS SUBTOTAL:  ${fmtMoney(totalAmt)}`,
+    hoursSubtotalLines,
     expensesSection,
     '',
     `GRAND TOTAL:     ${fmtMoney(grandTotal)}`,
@@ -2003,7 +2123,8 @@ function confirmInvoice() {
   expenses = [...expenses].sort((a, b) => a.date.localeCompare(b.date));
 
   const totalMin = entries.reduce((s, e) => s + e.minutes, 0);
-  const totalAmt = entries.reduce((s, e) => s + calcAmount(e.minutes, e.rate), 0);
+  const billing = calcClientBilling(client, entries);
+  const totalAmt = billing.amount;
   const expensesTotal = expenses.reduce((s, e) => s + e.amount, 0);
   const grandTotal = totalAmt + expensesTotal;
 
@@ -2019,9 +2140,27 @@ function confirmInvoice() {
       <td>${e.location || '—'}</td>
       <td>${e.noteText || '—'}</td>
       <td>${fmtDur(e.minutes)}</td>
-      <td>$${e.rate}/hr</td>
-      <td>${fmtMoney(calcAmount(e.minutes, e.rate))}</td>
+      <td>${billing.isRetainer ? '—' : '$' + e.rate + '/hr'}</td>
+      <td>${billing.isRetainer ? '—' : fmtMoney(calcAmount(e.minutes, e.rate))}</td>
     </tr>`).join('');
+
+  const hoursSubtotalRows = billing.isRetainer ? `
+      <tr>
+        <td colspan="7">Retainer Fee (${billing.months} mo${billing.months !== 1 ? 's' : ''} × ${fmtMoney(billing.fee / (billing.months || 1))})</td>
+        <td>${fmtMoney(billing.fee)}</td>
+      </tr>${billing.overageHours > 0 ? `
+      <tr>
+        <td colspan="7">Overage (${billing.overageHours.toFixed(2)}h @ ${fmtMoney(billing.overageRate)}/hr)</td>
+        <td>${fmtMoney(billing.overageAmount)}</td>
+      </tr>` : ''}
+      <tr class="total-row">
+        <td colspan="7">Hours Subtotal</td>
+        <td>${fmtMoney(totalAmt)}</td>
+      </tr>` : `
+      <tr class="total-row">
+        <td colspan="7">Hours Subtotal</td>
+        <td>${fmtMoney(totalAmt)}</td>
+      </tr>`;
 
   const expenseRows = expenses.map(e => `
     <tr>
@@ -2064,11 +2203,7 @@ function confirmInvoice() {
   <p class="meta">${monthLabel} &nbsp;·&nbsp; ${fmtDur(totalMin)} logged &nbsp;·&nbsp; ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</p>
   <table>
     <thead><tr><th>Date</th><th>Time</th><th>Event</th><th>Location</th><th>Description</th><th>Duration</th><th>Rate</th><th>Amount</th></tr></thead>
-    <tbody>${rows}
-      <tr class="total-row">
-        <td colspan="7">Hours Subtotal</td>
-        <td>${fmtMoney(totalAmt)}</td>
-      </tr>
+    <tbody>${rows}${hoursSubtotalRows}
     </tbody>
   </table>
   ${expenses.length ? `
