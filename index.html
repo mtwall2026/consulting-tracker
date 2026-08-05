@@ -396,6 +396,51 @@
     <div class="summary-grid" id="summaryGrid"></div>
   </div>
 
+  <!-- Expenses -->
+  <div class="card" id="expensesCard">
+    <h2>Expenses</h2>
+    <div class="manual-row" id="addExpenseRow">
+      <label>Client
+        <select id="expenseClient"><option value="">— General —</option></select>
+      </label>
+      <label>Date
+        <input type="date" id="expenseDate" />
+      </label>
+      <label>Category
+        <select id="expenseCategory">
+          <option value="Travel">Travel</option>
+          <option value="Mileage">Mileage</option>
+          <option value="Meals">Meals &amp; Entertainment</option>
+          <option value="Software">Software/Subscriptions</option>
+          <option value="Materials">Materials/Supplies</option>
+          <option value="Office">Office</option>
+          <option value="Other">Other</option>
+        </select>
+      </label>
+      <label>Amount
+        <input type="number" id="expenseAmount" placeholder="0.00" min="0" step="0.01" style="width:100px" />
+      </label>
+      <label>Description
+        <input id="expenseDescription" placeholder="Optional description" style="width:170px" />
+      </label>
+      <button class="btn btn-primary" onclick="addExpense()" style="align-self:flex-end">+ Log Expense</button>
+    </div>
+    <div class="log-header" style="margin-top:16px">
+      <h2 style="margin-bottom:0;font-size:0.95rem">Expense Log</h2>
+      <div class="filter-row">
+        <select id="filterExpenseClient" onchange="renderExpenseLog()"><option value="">All clients</option></select>
+        <select id="filterExpenseMonth" onchange="onFilterExpenseMonthChange()"><option value="">All Months</option></select>
+      </div>
+    </div>
+    <div id="expenseLogBody"></div>
+    <div class="summary-grid" id="expenseSummaryGrid" style="margin-top:14px"></div>
+    <div class="export-row" style="margin-top:14px">
+      <button class="btn btn-ghost btn-sm" id="btnExportExpensesCSV" onclick="exportExpensesCSV()">Export Expenses CSV</button>
+      <button class="btn btn-ghost btn-sm" id="btnImportExpensesCSVBtn" onclick="document.getElementById('importExpensesCSVFile').click()">Import Expenses CSV</button>
+      <input type="file" id="importExpensesCSVFile" accept=".csv" style="display:none" onchange="importExpensesCSV(event)" />
+    </div>
+  </div>
+
   <!-- Charts -->
   <div class="card" id="chartsCard">
     <h2>Charts</h2>
@@ -454,13 +499,21 @@ let teamViewState = null;
 function activeState() { return teamViewActive ? teamViewState : state; }
 
 function load() {
-  try { return JSON.parse(localStorage.getItem('ct_state')) || defaultState(); }
+  try { return migrateState(JSON.parse(localStorage.getItem('ct_state')) || defaultState()); }
   catch { return defaultState(); }
+}
+// Older saved/exported files predate the expenses feature and won't have
+// this field — every load path (local, OneDrive, a shared teammate's file)
+// needs to backfill it so `.expenses` is never undefined.
+function migrateState(s) {
+  if (!s.expenses) s.expenses = [];
+  return s;
 }
 function defaultState() {
   return {
     clients: [{ id: uid(), name: 'Century 3', rate: 200 }],
     entries: [],
+    expenses: [],
     nextInvoiceNum: 1001
   };
 }
@@ -534,6 +587,7 @@ function init() {
   const now = new Date();
   document.getElementById('manualDate').value = now.toISOString().slice(0, 10);
   document.getElementById('manualTime').value = now.toTimeString().slice(0, 5);
+  document.getElementById('expenseDate').value = now.toISOString().slice(0, 10);
 
   // Month filter starts on All
   document.getElementById('filterMonth').value = '';
@@ -551,6 +605,9 @@ function render() {
   renderSummary();
   renderCharts();
   renderCalendar();
+  renderExpenseMonthFilter();
+  renderExpenseLog();
+  renderExpenseSummary();
 }
 
 // Hides/disables every control that mutates data while viewing a
@@ -559,11 +616,11 @@ function render() {
 function applyTeamViewVisibility() {
   var banner = document.getElementById('teamViewBanner');
   if (banner) banner.style.display = teamViewActive ? 'inline' : 'none';
-  ['addClientRow', 'timerCard', 'manualEntryCard'].forEach(id => {
+  ['addClientRow', 'timerCard', 'manualEntryCard', 'addExpenseRow'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = teamViewActive ? 'none' : '';
   });
-  ['btnImportCSVBtn', 'btnClearData', 'btnPrintInvoice'].forEach(id => {
+  ['btnImportCSVBtn', 'btnClearData', 'btnPrintInvoice', 'btnImportExpensesCSVBtn'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.disabled = teamViewActive;
   });
@@ -573,6 +630,11 @@ function onFilterMonthChange() {
   renderLog();
   renderSummary();
   renderCharts();
+}
+
+function onFilterExpenseMonthChange() {
+  renderExpenseLog();
+  renderExpenseSummary();
 }
 
 function renderMonthFilter() {
@@ -621,6 +683,25 @@ function renderClients() {
     const o = document.createElement('option'); o.value = c.id; o.textContent = c.name; manualEl.appendChild(o);
   });
   if (manualPrev) manualEl.value = manualPrev;
+
+  // Expense form's client picker always uses the real state (adding an
+  // expense never applies to a teammate's data); the expense filter
+  // reflects whatever's currently being viewed.
+  const expenseClientEl = document.getElementById('expenseClient');
+  const expenseClientPrev = expenseClientEl.value;
+  expenseClientEl.innerHTML = '<option value="">— General —</option>';
+  state.clients.forEach(c => {
+    const o = document.createElement('option'); o.value = c.id; o.textContent = c.name; expenseClientEl.appendChild(o);
+  });
+  if (expenseClientPrev) expenseClientEl.value = expenseClientPrev;
+
+  const filterExpenseClientEl = document.getElementById('filterExpenseClient');
+  const filterExpenseClientPrev = filterExpenseClientEl.value;
+  filterExpenseClientEl.innerHTML = '<option value="">All clients</option><option value="__general__">General (no client)</option>';
+  activeState().clients.forEach(c => {
+    const o = document.createElement('option'); o.value = c.id; o.textContent = c.name; filterExpenseClientEl.appendChild(o);
+  });
+  if (filterExpenseClientPrev) filterExpenseClientEl.value = filterExpenseClientPrev;
 }
 
 function addClient() {
@@ -922,6 +1003,158 @@ function renderLog() {
           </tr>`).join('')}
       </tbody>
     </table>`;
+}
+
+// ── Expenses ───────────────────────────────────────────
+const EXPENSE_CATEGORIES = ['Travel', 'Mileage', 'Meals', 'Software', 'Materials', 'Office', 'Other'];
+
+function addExpense() {
+  const clientId = document.getElementById('expenseClient').value; // '' = general, no client
+  const date = document.getElementById('expenseDate').value;
+  const category = document.getElementById('expenseCategory').value;
+  const amount = parseFloat(document.getElementById('expenseAmount').value);
+  const description = document.getElementById('expenseDescription').value.trim();
+  if (!date) { alert('Pick a date.'); return; }
+  if (!amount || amount <= 0) { alert('Enter a valid amount.'); return; }
+  const client = clientId ? state.clients.find(c => c.id === clientId) : null;
+  state.expenses.unshift({
+    id: uid(), clientId: clientId || '', clientName: client ? client.name : '',
+    date, category, amount, description
+  });
+  document.getElementById('expenseAmount').value = '';
+  document.getElementById('expenseDescription').value = '';
+  save(); render(); odAutoSave();
+}
+
+function deleteExpense(id) {
+  state.expenses = state.expenses.filter(e => e.id !== id);
+  save(); render(); odAutoSave();
+}
+
+function editExpense(id) {
+  const tr = document.querySelector(`tr[data-expid="${id}"]`);
+  const e = state.expenses.find(e => e.id === id);
+  if (!e || !tr) return;
+
+  const clientOptions = '<option value="">— General —</option>' + state.clients.map(c =>
+    `<option value="${c.id}" ${c.id === e.clientId ? 'selected' : ''}>${c.name}</option>`
+  ).join('');
+  const categoryOptions = EXPENSE_CATEGORIES.map(v =>
+    `<option value="${v}" ${e.category === v ? 'selected' : ''}>${v}</option>`
+  ).join('');
+
+  const s = 'background:var(--surface2);border:1px solid var(--border);border-radius:5px;color:var(--text);padding:4px 6px;font-size:0.82rem';
+
+  tr.innerHTML = `
+    <td><input type="date" value="${e.date}" id="eed-date" style="${s};width:120px"></td>
+    <td><select id="eed-client" style="${s}">${clientOptions}</select></td>
+    <td><select id="eed-category" style="${s}">${categoryOptions}</select></td>
+    <td><input type="text" value="${e.description || ''}" id="eed-desc" placeholder="Description" style="${s};width:160px"></td>
+    <td><input type="number" value="${e.amount}" id="eed-amount" min="0" step="0.01" style="${s};width:90px"></td>
+    <td style="display:flex;gap:6px;padding:6px 10px">
+      <button class="btn btn-primary btn-sm" onclick="saveExpense('${id}')">Save</button>
+      <button class="btn btn-ghost btn-sm" onclick="renderExpenseLog()">Cancel</button>
+    </td>`;
+}
+
+function saveExpense(id) {
+  const idx = state.expenses.findIndex(e => e.id === id);
+  if (idx === -1) return;
+  const clientId = document.getElementById('eed-client').value;
+  const client = clientId ? state.clients.find(c => c.id === clientId) : null;
+  state.expenses[idx] = {
+    ...state.expenses[idx],
+    date: document.getElementById('eed-date').value,
+    clientId: clientId || '',
+    clientName: client ? client.name : '',
+    category: document.getElementById('eed-category').value,
+    description: document.getElementById('eed-desc').value.trim(),
+    amount: parseFloat(document.getElementById('eed-amount').value) || 0,
+  };
+  save(); render(); odAutoSave();
+}
+
+function renderExpenseMonthFilter() {
+  const el = document.getElementById('filterExpenseMonth');
+  const prev = el.value;
+  const months = [...new Set(activeState().expenses.map(e => e.date.slice(0, 7)))]
+    .sort((a, b) => b.localeCompare(a));
+  el.innerHTML = '<option value="">All Months</option>';
+  months.forEach(m => {
+    const label = new Date(m + '-02').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    el.innerHTML += `<option value="${m}" ${prev === m ? 'selected' : ''}>${label}</option>`;
+  });
+  if (prev) el.value = prev;
+}
+
+function renderExpenseLog() {
+  const filterClient = document.getElementById('filterExpenseClient').value;
+  const filterMonth  = document.getElementById('filterExpenseMonth').value;
+
+  let expenses = activeState().expenses;
+  if (filterClient === '__general__') expenses = expenses.filter(e => !e.clientId);
+  else if (filterClient) expenses = expenses.filter(e => e.clientId === filterClient);
+  if (filterMonth) expenses = expenses.filter(e => e.date.startsWith(filterMonth));
+  expenses = [...expenses].sort((a, b) => b.date.localeCompare(a.date));
+
+  const body = document.getElementById('expenseLogBody');
+  if (!expenses.length) { body.innerHTML = '<p class="empty">No expenses yet.</p>'; return; }
+
+  body.innerHTML = `
+    <table>
+      <thead><tr>
+        <th>Date</th><th>Client</th><th>Category</th><th>Description</th><th>Amount</th><th></th>
+      </tr></thead>
+      <tbody>
+        ${expenses.map(e => `
+          <tr data-expid="${e.id}">
+            <td>${fmtDate(e.date)}</td>
+            <td>${e.clientName ? `<span class="badge">${e.clientName}</span>` : '<span style="color:var(--muted)">General</span>'}</td>
+            <td>${e.category}</td>
+            <td>${e.description || '<span style="color:var(--muted)">—</span>'}</td>
+            <td class="amount">${fmtMoney(e.amount)}</td>
+            <td style="display:flex;gap:4px">
+              ${teamViewActive ? '' : `
+              <button class="del-row" onclick="editExpense('${e.id}')" title="Edit" style="color:var(--accent)">✎</button>
+              <button class="del-row" onclick="deleteExpense('${e.id}')" title="Delete">×</button>`}
+            </td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+function renderExpenseSummary() {
+  const filterMonth = document.getElementById('filterExpenseMonth').value;
+  const expenses = filterMonth ? activeState().expenses.filter(e => e.date.startsWith(filterMonth)) : activeState().expenses;
+
+  const total = expenses.reduce((s, e) => s + e.amount, 0);
+  const byClient = {};
+  let generalTotal = 0;
+  expenses.forEach(e => {
+    if (e.clientId) {
+      if (!byClient[e.clientId]) byClient[e.clientId] = { name: e.clientName, amt: 0 };
+      byClient[e.clientId].amt += e.amount;
+    } else {
+      generalTotal += e.amount;
+    }
+  });
+
+  const grid = document.getElementById('expenseSummaryGrid');
+  grid.innerHTML = `
+    <div class="summary-card">
+      <div class="label">Total Expenses</div>
+      <div class="value">${fmtMoney(total)}</div>
+    </div>
+    ${generalTotal ? `
+    <div class="summary-card">
+      <div class="label">General</div>
+      <div class="value">${fmtMoney(generalTotal)}</div>
+    </div>` : ''}
+    ${Object.values(byClient).map(c => `
+      <div class="summary-card">
+        <div class="label">${c.name}</div>
+        <div class="value">${fmtMoney(c.amt)}</div>
+      </div>`).join('')}`;
 }
 
 // ── Summary ────────────────────────────────────────────
@@ -1277,6 +1510,76 @@ function importCSV(event) {
   reader.readAsText(file);
 }
 
+// ── Export/Import Expenses CSV ──────────────────────────
+// Plain CSV, same shape as the time log's — opens in Excel, Sheets, or any
+// accounting software's importer, and round-trips through this app too.
+function exportExpensesCSV() {
+  const filterMonth = document.getElementById('filterExpenseMonth').value;
+  let expenses = filterMonth ? activeState().expenses.filter(e => e.date.startsWith(filterMonth)) : activeState().expenses;
+
+  const rows = [['Date', 'Client', 'Category', 'Description', 'Amount ($)']];
+  expenses.forEach(e => rows.push([e.date, e.clientName || '', e.category, e.description || '', e.amount.toFixed(2)]));
+
+  const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = `expenses-${filterMonth || 'all'}.csv`;
+  a.click();
+}
+
+function importExpensesCSV(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const lines = e.target.result.split('\n').map(l => l.trim()).filter(l => l);
+    const header = lines[0].split(',').map(h => h.replace(/"/g, '').trim());
+    const dateIdx     = header.indexOf('Date');
+    const clientIdx   = header.indexOf('Client');
+    const categoryIdx = header.indexOf('Category');
+    const descIdx     = header.indexOf('Description');
+    const amountIdx   = header.indexOf('Amount ($)');
+
+    if (dateIdx === -1 || amountIdx === -1) {
+      alert('CSV format not recognized. Please use a CSV exported from this app.');
+      return;
+    }
+
+    let imported = 0, skipped = 0;
+    for (let i = 1; i < lines.length; i++) {
+      const cols = lines[i].match(/(".*?"|[^,]+)(?=,|$)/g);
+      if (!cols) continue;
+      const clean = cols.map(c => c.replace(/^"|"$/g, '').replace(/""/g, '"').trim());
+      const date       = clean[dateIdx];
+      const clientName = clientIdx > -1 ? clean[clientIdx] : '';
+      const category   = categoryIdx > -1 && clean[categoryIdx] ? clean[categoryIdx] : 'Other';
+      const description = descIdx > -1 ? clean[descIdx] : '';
+      const amount     = parseFloat(clean[amountIdx]);
+
+      if (!date || isNaN(amount)) { skipped++; continue; }
+
+      let clientId = '';
+      if (clientName) {
+        let client = state.clients.find(c => c.name.toLowerCase() === clientName.toLowerCase());
+        if (!client) { client = { id: uid(), name: clientName, rate: 200 }; state.clients.push(client); }
+        clientId = client.id;
+      }
+
+      // Skip exact duplicates
+      const duplicate = state.expenses.some(ex => ex.date === date && ex.amount === amount && ex.category === category && ex.description === description);
+      if (duplicate) { skipped++; continue; }
+
+      state.expenses.unshift({ id: uid(), clientId, clientName, category, description, amount, date });
+      imported++;
+    }
+
+    save(); render();
+    event.target.value = '';
+    alert(`Import complete: ${imported} expenses added, ${skipped} skipped (duplicates or invalid).`);
+  };
+  reader.readAsText(file);
+}
+
 // ── Print Invoice ──────────────────────────────────────
 function printInvoice() {
   const modal = document.getElementById('invoiceModal');
@@ -1334,8 +1637,14 @@ function emailInvoice() {
   if (filterMonth) entries = entries.filter(e => e.date.startsWith(filterMonth));
   entries = [...entries].sort((a, b) => a.date.localeCompare(b.date));
 
+  let expenses = state.expenses.filter(e => e.clientId === filterClient);
+  if (filterMonth) expenses = expenses.filter(e => e.date.startsWith(filterMonth));
+  expenses = [...expenses].sort((a, b) => a.date.localeCompare(b.date));
+
   const totalMin = entries.reduce((s, e) => s + e.minutes, 0);
   const totalAmt = entries.reduce((s, e) => s + calcAmount(e.minutes, e.rate), 0);
+  const expensesTotal = expenses.reduce((s, e) => s + e.amount, 0);
+  const grandTotal = totalAmt + expensesTotal;
 
   const monthLabel = filterMonth
     ? new Date(filterMonth + '-02').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
@@ -1371,6 +1680,33 @@ function emailInvoice() {
     padR(fmtMoney(calcAmount(e.minutes, e.rate)), COL_W[7]),
   ].join('  ')).join('\n');
 
+  const EXP_COL_W = [12, 16, 30, 12];
+  const expenseHeaderRow = [
+    padR('Date', EXP_COL_W[0]),
+    padR('Category', EXP_COL_W[1]),
+    padR('Description', EXP_COL_W[2]),
+    padR('Amount', EXP_COL_W[3]),
+  ].join('  ');
+  const expenseDivider = '-'.repeat(expenseHeaderRow.length);
+  const expenseRows = expenses.map(e => [
+    padR(fmtDate(e.date), EXP_COL_W[0]),
+    padR(e.category, EXP_COL_W[1]),
+    padR(e.description || '—', EXP_COL_W[2]),
+    padR(fmtMoney(e.amount), EXP_COL_W[3]),
+  ].join('  ')).join('\n');
+
+  const expensesSection = expenses.length ? [
+    '',
+    'EXPENSES',
+    expenseDivider,
+    expenseHeaderRow,
+    expenseDivider,
+    expenseRows,
+    expenseDivider,
+    '',
+    `EXPENSES SUBTOTAL: ${fmtMoney(expensesTotal)}`,
+  ].join('\n') : '';
+
   const body = [
     'CONSULTING INVOICE',
     '==================',
@@ -1386,8 +1722,11 @@ function emailInvoice() {
     entryRows,
     divider,
     '',
-    `TOTAL HOURS:   ${fmtDur(totalMin)}`,
-    `TOTAL AMOUNT:  ${fmtMoney(totalAmt)}`,
+    `TOTAL HOURS:     ${fmtDur(totalMin)}`,
+    `HOURS SUBTOTAL:  ${fmtMoney(totalAmt)}`,
+    expensesSection,
+    '',
+    `GRAND TOTAL:     ${fmtMoney(grandTotal)}`,
     '',
     '--',
     'Cirrobound Solutions',
@@ -1422,8 +1761,14 @@ function confirmInvoice() {
   if (filterMonth) entries = entries.filter(e => e.date.startsWith(filterMonth));
   entries = [...entries].sort((a, b) => a.date.localeCompare(b.date));
 
+  let expenses = state.expenses.filter(e => e.clientId === filterClient);
+  if (filterMonth) expenses = expenses.filter(e => e.date.startsWith(filterMonth));
+  expenses = [...expenses].sort((a, b) => a.date.localeCompare(b.date));
+
   const totalMin = entries.reduce((s, e) => s + e.minutes, 0);
   const totalAmt = entries.reduce((s, e) => s + calcAmount(e.minutes, e.rate), 0);
+  const expensesTotal = expenses.reduce((s, e) => s + e.amount, 0);
+  const grandTotal = totalAmt + expensesTotal;
 
   const monthLabel = filterMonth
     ? new Date(filterMonth + '-02').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
@@ -1441,6 +1786,14 @@ function confirmInvoice() {
       <td>${fmtMoney(calcAmount(e.minutes, e.rate))}</td>
     </tr>`).join('');
 
+  const expenseRows = expenses.map(e => `
+    <tr>
+      <td>${fmtDate(e.date)}</td>
+      <td>${e.category}</td>
+      <td>${e.description || '—'}</td>
+      <td>${fmtMoney(e.amount)}</td>
+    </tr>`).join('');
+
   const win = window.open('', '_blank');
   win.document.write(`<!DOCTYPE html><html><head><title>Invoice – ${clientName}</title>
   <style>
@@ -1451,11 +1804,13 @@ function confirmInvoice() {
     .company h2 { font-size: 1.3rem; margin: 0 0 4px; }
     .company p { color: #555; font-size: 0.85rem; margin: 0; }
     h1 { font-size: 1.4rem; margin: 0 0 4px; }
+    h2.section { font-size: 1.05rem; margin: 28px 0 10px; }
     .meta { color: #555; font-size: 0.9rem; margin-bottom: 24px; }
     table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
     th { text-align: left; padding: 8px 10px; border-bottom: 2px solid #111; font-weight: 600; }
     td { padding: 8px 10px; border-bottom: 1px solid #ddd; }
     .total-row td { border-top: 2px solid #111; border-bottom: none; font-weight: 700; font-size: 1rem; }
+    .grand-total { text-align: right; margin-top: 24px; font-size: 1.2rem; font-weight: 800; }
     @media print { body { padding: 20px; } }
   </style></head><body>
   <div class="invoice-header">
@@ -1474,11 +1829,23 @@ function confirmInvoice() {
     <thead><tr><th>Date</th><th>Time</th><th>Event</th><th>Location</th><th>Description</th><th>Duration</th><th>Rate</th><th>Amount</th></tr></thead>
     <tbody>${rows}
       <tr class="total-row">
-        <td colspan="5">Total</td>
+        <td colspan="7">Hours Subtotal</td>
         <td>${fmtMoney(totalAmt)}</td>
       </tr>
     </tbody>
   </table>
+  ${expenses.length ? `
+  <h2 class="section">Expenses</h2>
+  <table>
+    <thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Amount</th></tr></thead>
+    <tbody>${expenseRows}
+      <tr class="total-row">
+        <td colspan="3">Expenses Subtotal</td>
+        <td>${fmtMoney(expensesTotal)}</td>
+      </tr>
+    </tbody>
+  </table>` : ''}
+  <div class="grand-total">Grand Total: ${fmtMoney(grandTotal)}</div>
   <script>window.onload = () => { window.print(); }<\/script>
   </body></html>`);
   win.document.close();
@@ -1623,7 +1990,7 @@ async function switchTeamView() {
     if (!res.ok) throw new Error(await res.text());
     var loaded = await res.json();
     if (!loaded.clients || !loaded.entries) throw new Error('Invalid data in teammate file.');
-    teamViewState = loaded;
+    teamViewState = migrateState(loaded);
     teamViewActive = true;
     render();
   } catch(e) {
@@ -1762,7 +2129,7 @@ async function odLoad(silent) {
     var loaded = await res.json();
     if (!loaded.clients || !loaded.entries) { if (!silent) alert('Invalid data in OneDrive file.'); return; }
     if (!silent && !confirm('Load ' + loaded.entries.length + ' entries and ' + loaded.clients.length + ' clients from OneDrive? This replaces current data.')) return;
-    state = loaded;
+    state = migrateState(loaded);
     save();
     render();
     if (!silent) alert('Loaded from OneDrive successfully.');
