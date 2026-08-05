@@ -351,6 +351,9 @@
         <input type="number" id="newClientRetainerAmount" placeholder="Retainer $/mo" min="0" step="1" style="width:130px" />
         <input type="number" id="newClientRetainerHours" placeholder="Included hrs" min="0" step="0.5" style="width:110px" />
         <input type="number" id="newClientOverageRate" placeholder="Overage $/hr (opt.)" min="0" step="1" style="width:160px" />
+        <label style="display:flex;flex-direction:column;gap:2px;font-size:0.72rem;color:var(--muted)">Retainer starts (leave blank if always retainer)
+          <input type="date" id="newClientRetainerStartDate" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:7px 10px;font-size:0.9rem" />
+        </label>
       </span>
       <button class="btn btn-primary" id="btnAddClient" onclick="addClient()">+ Add Client</button>
       <button class="btn btn-ghost" id="btnCancelEditClient" onclick="cancelEditClient()" style="display:none">Cancel</button>
@@ -655,21 +658,37 @@ function roundTimerElapsed(ms) {
 function calcAmount(minutes, rate) { return (minutes / 60) * rate; }
 function fmtMoney(n) { return '$' + n.toFixed(2); }
 
+// True if a given entry falls under a retainer client's flat-fee coverage —
+// i.e. on/after client.retainerStartDate. An unset start date means the
+// client has always been retainer (e.g. brand new), so every entry counts.
+function isEntryUnderRetainer(client, entry) {
+  if (!client || client.billingType !== 'retainer') return false;
+  if (!client.retainerStartDate) return true;
+  return entry.date >= client.retainerStartDate;
+}
+
 // What a client owes for a set of entries (already filtered to that client
 // and whatever date range is relevant). Hourly clients: sum each entry's
 // own logged rate, unchanged from before retainers existed. Retainer
-// clients: a flat fee for every distinct calendar month that has at least
-// one entry, plus overage for hours beyond that month's included
-// allotment — this only charges months with logged activity, so invoicing
-// is expected to target a specific month (the app already works that way).
+// clients: entries before retainerStartDate (if set — e.g. an existing
+// hourly client just converted mid-relationship) still bill at their own
+// logged hourly rate, unaffected by the switch; entries on/after that date
+// get a flat fee for every distinct calendar month with at least one entry,
+// plus overage for hours beyond that month's included allotment. Charging
+// only applies to months with logged activity, so invoicing is expected to
+// target a specific month (the app already works that way).
 function calcClientBilling(client, entries) {
   if (!client || client.billingType !== 'retainer') {
     return { isRetainer: false, amount: entries.reduce((s, e) => s + calcAmount(e.minutes, e.rate), 0) };
   }
+  const preEntries = entries.filter(e => !isEntryUnderRetainer(client, e));
+  const retainerEntries = entries.filter(e => isEntryUnderRetainer(client, e));
+  const hourlyAmount = preEntries.reduce((s, e) => s + calcAmount(e.minutes, e.rate), 0);
+
   const overageRate = client.overageRate || client.rate;
   const includedHours = client.retainerHours || 0;
   const minutesByMonth = {};
-  entries.forEach(e => {
+  retainerEntries.forEach(e => {
     const m = e.date.slice(0, 7);
     minutesByMonth[m] = (minutesByMonth[m] || 0) + e.minutes;
   });
@@ -683,9 +702,10 @@ function calcClientBilling(client, entries) {
     overageAmount += over * overageRate;
   });
   return {
-    isRetainer: true, months: months.length, includedHours,
+    isRetainer: true, hourlyAmount, hasPreRetainerHours: preEntries.length > 0,
+    months: months.length, includedHours,
     fee, overageHours, overageRate, overageAmount,
-    amount: fee + overageAmount
+    amount: hourlyAmount + fee + overageAmount
   };
 }
 function fmtDate(iso) {
@@ -854,6 +874,7 @@ function editClientPrompt(id) {
   document.getElementById('newClientRetainerAmount').value = c.retainerAmount || '';
   document.getElementById('newClientRetainerHours').value = c.retainerHours || '';
   document.getElementById('newClientOverageRate').value = c.overageRate || '';
+  document.getElementById('newClientRetainerStartDate').value = c.retainerStartDate || '';
   updateClientFormMode();
   document.getElementById('newClientName').scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
@@ -866,6 +887,7 @@ function cancelEditClient() {
   document.getElementById('newClientRetainerAmount').value = '';
   document.getElementById('newClientRetainerHours').value = '';
   document.getElementById('newClientOverageRate').value = '';
+  document.getElementById('newClientRetainerStartDate').value = '';
   updateClientFormMode();
 }
 
@@ -877,12 +899,17 @@ function addClient() {
   const retainerHours = parseFloat(document.getElementById('newClientRetainerHours').value) || 0;
   const overageRateInput = document.getElementById('newClientOverageRate').value;
   const overageRate = overageRateInput ? parseFloat(overageRateInput) : rate;
+  // Blank = always billed as retainer (e.g. a brand-new client). Set this
+  // when converting an existing hourly client so their past entries keep
+  // billing at the old hourly rate instead of being retroactively folded
+  // into the retainer fee.
+  const retainerStartDate = document.getElementById('newClientRetainerStartDate').value || '';
 
   if (!name) { alert('Enter a client name.'); return; }
   if (!rate) { alert('Select a rate.'); return; }
   if (billingType === 'retainer' && (!retainerAmount || retainerAmount <= 0)) { alert('Enter a retainer amount.'); return; }
 
-  const clientData = { name, rate, billingType, retainerAmount, retainerHours, overageRate };
+  const clientData = { name, rate, billingType, retainerAmount, retainerHours, overageRate, retainerStartDate };
 
   if (editingClientId) {
     const idx = state.clients.findIndex(c => c.id === editingClientId);
@@ -2016,19 +2043,25 @@ function emailInvoice() {
 
   const divider = '-'.repeat(headerRow.length);
 
-  const entryRows = entries.map(e => [
-    padR(fmtDate(e.date), COL_W[0]),
-    padR(e.time || '—', COL_W[1]),
-    padR(e.note || '—', COL_W[2]),
-    padR(e.location || '—', COL_W[3]),
-    padR(e.noteText || '—', COL_W[4]),
-    padR(fmtDur(e.minutes), COL_W[5]),
-    padR(billing.isRetainer ? '—' : '$' + e.rate + '/hr', COL_W[6]),
-    padR(billing.isRetainer ? '—' : fmtMoney(calcAmount(e.minutes, e.rate)), COL_W[7]),
-  ].join('  ')).join('\n');
+  const entryRows = entries.map(e => {
+    const billedAsRetainer = isEntryUnderRetainer(client, e);
+    return [
+      padR(fmtDate(e.date), COL_W[0]),
+      padR(e.time || '—', COL_W[1]),
+      padR(e.note || '—', COL_W[2]),
+      padR(e.location || '—', COL_W[3]),
+      padR(e.noteText || '—', COL_W[4]),
+      padR(fmtDur(e.minutes), COL_W[5]),
+      padR(billedAsRetainer ? '—' : '$' + e.rate + '/hr', COL_W[6]),
+      padR(billedAsRetainer ? '—' : fmtMoney(calcAmount(e.minutes, e.rate)), COL_W[7]),
+    ].join('  ');
+  }).join('\n');
 
   const hoursSubtotalLines = billing.isRetainer
     ? [
+        billing.hasPreRetainerHours
+          ? `HOURLY SUBTOTAL (before retainer): ${fmtMoney(billing.hourlyAmount)}`
+          : null,
         `RETAINER FEE (${billing.months} mo${billing.months !== 1 ? 's' : ''} × ${fmtMoney(billing.fee / (billing.months || 1))}): ${fmtMoney(billing.fee)}`,
         billing.overageHours > 0
           ? `OVERAGE (${billing.overageHours.toFixed(2)}h @ ${fmtMoney(billing.overageRate)}/hr): ${fmtMoney(billing.overageAmount)}`
@@ -2132,7 +2165,9 @@ function confirmInvoice() {
     ? new Date(filterMonth + '-02').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
     : 'All Time';
 
-  const rows = entries.map(e => `
+  const rows = entries.map(e => {
+    const billedAsRetainer = isEntryUnderRetainer(client, e);
+    return `
     <tr>
       <td>${fmtDate(e.date)}</td>
       <td>${e.time || '—'}</td>
@@ -2140,11 +2175,17 @@ function confirmInvoice() {
       <td>${e.location || '—'}</td>
       <td>${e.noteText || '—'}</td>
       <td>${fmtDur(e.minutes)}</td>
-      <td>${billing.isRetainer ? '—' : '$' + e.rate + '/hr'}</td>
-      <td>${billing.isRetainer ? '—' : fmtMoney(calcAmount(e.minutes, e.rate))}</td>
-    </tr>`).join('');
+      <td>${billedAsRetainer ? '—' : '$' + e.rate + '/hr'}</td>
+      <td>${billedAsRetainer ? '—' : fmtMoney(calcAmount(e.minutes, e.rate))}</td>
+    </tr>`;
+  }).join('');
 
   const hoursSubtotalRows = billing.isRetainer ? `
+      ${billing.hasPreRetainerHours ? `
+      <tr>
+        <td colspan="7">Hourly Subtotal (before retainer)</td>
+        <td>${fmtMoney(billing.hourlyAmount)}</td>
+      </tr>` : ''}
       <tr>
         <td colspan="7">Retainer Fee (${billing.months} mo${billing.months !== 1 ? 's' : ''} × ${fmtMoney(billing.fee / (billing.months || 1))})</td>
         <td>${fmtMoney(billing.fee)}</td>
