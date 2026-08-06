@@ -271,6 +271,11 @@
       <span style="color:var(--muted)">Invoice #</span>
       <input type="text" id="invoiceNumInput" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--accent2);padding:6px 10px;font-size:0.9rem;text-align:right;width:140px;font-weight:700" />
     </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <input type="text" id="setNextInvoiceNumInput" placeholder="e.g. 1050" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 10px;font-size:0.8rem;width:90px" />
+      <button class="btn btn-ghost btn-sm" onclick="setNextInvoiceNumber()">Set Next #</button>
+      <span style="color:var(--muted);font-size:0.72rem">Fixes the counter if it's out of sync — doesn't touch invoices already generated.</span>
+    </div>
     <div style="display:flex;gap:10px;justify-content:space-between;align-items:center">
       <button class="btn btn-ghost btn-sm" onclick="resetInvoiceNumbers()" style="color:var(--danger);font-size:0.78rem">Reset Invoice #</button>
       <div style="display:flex;gap:10px">
@@ -1959,6 +1964,22 @@ function resetInvoiceNumbers() {
   save();
   updateInvoicePreview();
   alert('Invoice numbers reset to INV-1001.');
+}
+
+// Hard-sets the counter that auto-suggests the next invoice number — for
+// when it's drifted out of sync (e.g. invoices created outside this app).
+// Only affects future suggestions; every invoice number already assigned
+// and stored in state.invoiceNumbers is untouched.
+function setNextInvoiceNumber() {
+  const raw = document.getElementById('setNextInvoiceNumInput').value.trim();
+  const numericPart = parseInt(raw.replace(/[^0-9]/g, ''), 10);
+  if (!raw || isNaN(numericPart)) { alert('Enter a number, e.g. 1050.'); return; }
+  if (!confirm(`Set the next invoice number to INV-${numericPart}? This only affects invoices generated from now on.`)) return;
+  state.nextInvoiceNum = numericPart;
+  save();
+  document.getElementById('setNextInvoiceNumInput').value = '';
+  updateInvoicePreview();
+  alert(`Next invoice number is now INV-${numericPart}.`);
 }
 
 // Assigns (or reuses) an invoice number for `key`. If `overrideNum` is a
