@@ -267,9 +267,9 @@
     <label style="display:flex;flex-direction:column;gap:6px;font-size:0.85rem;color:var(--muted)">Month <span style="color:var(--muted);font-size:0.78rem">(leave blank for all time)</span>
       <input type="month" id="invoiceMonthPick" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 10px;font-size:0.95rem" onchange="updateInvoicePreview()" />
     </label>
-    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:0.9rem;display:flex;justify-content:space-between;align-items:center">
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:0.9rem;display:flex;justify-content:space-between;align-items:center;gap:10px">
       <span style="color:var(--muted)">Invoice #</span>
-      <strong id="invoiceNumPreview" style="color:var(--accent2)">—</strong>
+      <input type="text" id="invoiceNumInput" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--accent2);padding:6px 10px;font-size:0.9rem;text-align:right;width:140px;font-weight:700" />
     </div>
     <div style="display:flex;gap:10px;justify-content:space-between;align-items:center">
       <button class="btn btn-ghost btn-sm" onclick="resetInvoiceNumbers()" style="color:var(--danger);font-size:0.78rem">Reset Invoice #</button>
@@ -1948,8 +1948,8 @@ function updateInvoicePreview() {
   if (!state.invoiceNumbers) state.invoiceNumbers = {};
   if (!state.nextInvoiceNum) state.nextInvoiceNum = 1001;
   const key = `${clientId}-${month || 'all'}`;
-  const num = state.invoiceNumbers[key] || `INV-${state.nextInvoiceNum} (new)`;
-  document.getElementById('invoiceNumPreview').textContent = num;
+  const num = state.invoiceNumbers[key] || `INV-${state.nextInvoiceNum}`;
+  document.getElementById('invoiceNumInput').value = num;
 }
 function closeInvoiceModal() { document.getElementById('invoiceModal').style.display = 'none'; }
 function resetInvoiceNumbers() {
@@ -1961,26 +1961,39 @@ function resetInvoiceNumbers() {
   alert('Invoice numbers reset to INV-1001.');
 }
 
+// Assigns (or reuses) an invoice number for `key`. If `overrideNum` is a
+// non-empty string (e.g. typed into the modal's Invoice # field, or a
+// prompt on the Retainers tab), that exact value is used instead of the
+// auto-suggested one — for correcting ordering, matching an external
+// numbering scheme, etc. Either way, the running counter is bumped past
+// whatever number actually got used, so future auto-suggestions never
+// collide with a manually-assigned one, in order or not.
+function getOrAssignInvoiceNumber(key, overrideNum) {
+  if (!state.nextInvoiceNum) state.nextInvoiceNum = 1001;
+  if (!state.invoiceNumbers) state.invoiceNumbers = {};
+  const typed = overrideNum && overrideNum.trim();
+  const finalNum = typed || state.invoiceNumbers[key] || `INV-${state.nextInvoiceNum}`;
+  state.invoiceNumbers[key] = finalNum;
+  const numericPart = parseInt(String(finalNum).replace(/[^0-9]/g, ''), 10);
+  if (!isNaN(numericPart) && numericPart >= state.nextInvoiceNum) state.nextInvoiceNum = numericPart + 1;
+  save();
+  return finalNum;
+}
+
 // ── Email Invoice ──────────────────────────────────────
 // explicitClientId/explicitMonth let the Retainers tab's "Generate Next
 // Invoice" reuse this exact same invoice logic instead of requiring the
 // client+month picker modal.
 function emailInvoice(explicitClientId, explicitMonth) {
-  closeInvoiceModal();
   const filterClient = explicitClientId || document.getElementById('invoiceClientPick').value;
   const filterMonth   = explicitMonth !== undefined ? explicitMonth : document.getElementById('invoiceMonthPick').value;
+  // Only the modal-triggered call has a typed override to honor.
+  const typedInvoiceNum = explicitClientId ? null : document.getElementById('invoiceNumInput').value;
+  closeInvoiceModal();
   if (!filterClient) return;
 
-  // Reuse or assign invoice number
-  if (!state.nextInvoiceNum) state.nextInvoiceNum = 1001;
-  if (!state.invoiceNumbers) state.invoiceNumbers = {};
   const invoiceKey = `${filterClient}-${filterMonth || 'all'}`;
-  if (!state.invoiceNumbers[invoiceKey]) {
-    state.invoiceNumbers[invoiceKey] = `INV-${state.nextInvoiceNum}`;
-    state.nextInvoiceNum++;
-    save();
-  }
-  const invoiceNum = state.invoiceNumbers[invoiceKey];
+  const invoiceNum = getOrAssignInvoiceNumber(invoiceKey, typedInvoiceNum);
 
   const client = state.clients.find(c => c.id === filterClient);
   const clientName = client ? client.name : 'Client';
@@ -2108,21 +2121,14 @@ function emailInvoice(explicitClientId, explicitMonth) {
 }
 
 function confirmInvoice(explicitClientId, explicitMonth) {
-  closeInvoiceModal();
   const filterClient = explicitClientId || document.getElementById('invoiceClientPick').value;
   const filterMonth   = explicitMonth !== undefined ? explicitMonth : document.getElementById('invoiceMonthPick').value;
+  const typedInvoiceNum = explicitClientId ? null : document.getElementById('invoiceNumInput').value;
+  closeInvoiceModal();
   if (!filterClient) return;
 
-  // Reuse existing invoice number for same client+month, or assign new one
-  if (!state.nextInvoiceNum) state.nextInvoiceNum = 1001;
-  if (!state.invoiceNumbers) state.invoiceNumbers = {};
   const invoiceKey = `${filterClient}-${filterMonth || 'all'}`;
-  if (!state.invoiceNumbers[invoiceKey]) {
-    state.invoiceNumbers[invoiceKey] = `INV-${state.nextInvoiceNum}`;
-    state.nextInvoiceNum++;
-    save();
-  }
-  const invoiceNum = state.invoiceNumbers[invoiceKey];
+  const invoiceNum = getOrAssignInvoiceNumber(invoiceKey, typedInvoiceNum);
 
   const client = state.clients.find(c => c.id === filterClient);
   const clientName = client ? client.name : 'Client';
@@ -2350,17 +2356,6 @@ function findNextUnbilledOverageMonth(client) {
   }
 }
 
-function getOrAssignInvoiceNumber(key) {
-  if (!state.nextInvoiceNum) state.nextInvoiceNum = 1001;
-  if (!state.invoiceNumbers) state.invoiceNumbers = {};
-  if (!state.invoiceNumbers[key]) {
-    state.invoiceNumbers[key] = `INV-${state.nextInvoiceNum}`;
-    state.nextInvoiceNum++;
-    save();
-  }
-  return state.invoiceNumbers[key];
-}
-
 const INVOICE_STYLE = `
     body { font-family: 'Segoe UI', sans-serif; color: #111; padding: 40px; max-width: 800px; margin: 0 auto; }
     .invoice-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 32px; border-bottom: 2px solid #111; padding-bottom: 20px; }
@@ -2396,10 +2391,10 @@ function invoiceHeaderHtml(clientName, invoiceNum, subtitle) {
   </div>`;
 }
 
-function generateFeeInvoice(clientId, month, mode) {
+function generateFeeInvoice(clientId, month, mode, invoiceNumOverride) {
   const client = state.clients.find(c => c.id === clientId);
   if (!client) return;
-  const invoiceNum = getOrAssignInvoiceNumber(`${clientId}-${month}-fee`);
+  const invoiceNum = getOrAssignInvoiceNumber(`${clientId}-${month}-fee`, invoiceNumOverride);
   const monthLabel = new Date(month + '-02').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   const dateGenerated = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
   const fee = client.retainerAmount || 0;
@@ -2430,7 +2425,7 @@ function generateFeeInvoice(clientId, month, mode) {
   renderRetainersList();
 }
 
-function generateOverageInvoice(clientId, month, mode) {
+function generateOverageInvoice(clientId, month, mode, invoiceNumOverride) {
   const client = state.clients.find(c => c.id === clientId);
   if (!client) return;
   let entries = state.entries.filter(e => e.clientId === clientId && e.date.startsWith(month) && isEntryUnderRetainer(client, e));
@@ -2446,7 +2441,7 @@ function generateOverageInvoice(clientId, month, mode) {
   const expensesTotal = expenses.reduce((s, e) => s + e.amount, 0);
   const grandTotal = overageAmount + expensesTotal;
 
-  const invoiceNum = getOrAssignInvoiceNumber(`${clientId}-${month}-overage`);
+  const invoiceNum = getOrAssignInvoiceNumber(`${clientId}-${month}-overage`, invoiceNumOverride);
   const monthLabel = new Date(month + '-02').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   const dateGenerated = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
 
@@ -2516,7 +2511,11 @@ function generateFeeInvoiceForClient(clientId, mode) {
     alert(client.retainerStartDate ? 'Fee invoices are all caught up.' : 'Set a retainer start date first.');
     return;
   }
-  generateFeeInvoice(clientId, month, mode);
+  const key = `${clientId}-${month}-fee`;
+  const suggested = (state.invoiceNumbers && state.invoiceNumbers[key]) || `INV-${state.nextInvoiceNum || 1001}`;
+  const typed = prompt('Invoice number for this Retainer Fee invoice (edit if it needs to be out of the usual order):', suggested);
+  if (typed === null) return; // cancelled
+  generateFeeInvoice(clientId, month, mode, typed);
 }
 
 function generateOverageInvoiceForClient(clientId, mode) {
@@ -2527,7 +2526,11 @@ function generateOverageInvoiceForClient(clientId, mode) {
     alert('No overage invoice due right now — either the month isn\'t finished yet, or there was no overage.');
     return;
   }
-  generateOverageInvoice(clientId, month, mode);
+  const key = `${clientId}-${month}-overage`;
+  const suggested = (state.invoiceNumbers && state.invoiceNumbers[key]) || `INV-${state.nextInvoiceNum || 1001}`;
+  const typed = prompt('Invoice number for this Overage invoice (edit if it needs to be out of the usual order):', suggested);
+  if (typed === null) return; // cancelled
+  generateOverageInvoice(clientId, month, mode, typed);
 }
 
 function renderRetainersList() {
