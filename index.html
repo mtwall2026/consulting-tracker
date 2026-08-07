@@ -2244,6 +2244,8 @@ function recordInvoiceHistory({ key, kind, clientId, clientName, month, invoiceN
     snapshot: JSON.parse(JSON.stringify(data)),
     voided: false,
     voidedAt: null,
+    sent: false,
+    sentAt: null,
     paid: false,
     paidAt: null,
     paymentNote: '',
@@ -2293,6 +2295,8 @@ function backfillInvoiceHistory() {
       snapshot: JSON.parse(JSON.stringify(data)),
       voided: false,
       voidedAt: null,
+      sent: false,
+      sentAt: null,
       paid: false,
       paidAt: null,
       paymentNote: '',
@@ -2800,9 +2804,7 @@ function renderInvoiceHistory() {
               <td></td>
             </tr>`;
           }
-          const paidLabel = r.paid
-            ? `Paid${r.paidAt ? ' ' + fmtDate(r.paidAt.slice(0, 10)) : ''}`
-            : 'Unpaid';
+          const paidDateVal = r.paidAt ? r.paidAt.slice(0, 10) : '';
           return `
           <tr>
             <td><span class="badge">${r.clientName}</span></td>
@@ -2811,8 +2813,15 @@ function renderInvoiceHistory() {
             <td>${r.invoiceNum}</td>
             <td>${generatedLabel}</td>
             <td>
-              <span style="color:${r.paid ? 'var(--accent2)' : 'var(--muted)'}">${paidLabel}</span>
-              <button class="del-row" onclick="togglePaid('${r.id}')" title="${r.paid ? 'Mark Unpaid' : 'Mark Paid'}">${r.paid ? '&#8635;' : '&#10003;'}</button>
+              <div style="display:flex;align-items:center;gap:4px;margin-bottom:4px">
+                <span style="color:${r.sent ? 'var(--accent2)' : 'var(--muted)'};min-width:38px">${r.sent ? 'Sent' : 'Not sent'}</span>
+                <button class="del-row" onclick="toggleSent('${r.id}')" title="${r.sent ? 'Mark Not Sent' : 'Mark Sent'}">${r.sent ? '&#8635;' : '&#10003;'}</button>
+              </div>
+              <div style="display:flex;align-items:center;gap:4px">
+                <span style="color:${r.paid ? 'var(--accent2)' : 'var(--muted)'};min-width:38px">${r.paid ? 'Paid' : 'Unpaid'}</span>
+                <button class="del-row" onclick="togglePaid('${r.id}')" title="${r.paid ? 'Mark Unpaid' : 'Mark Paid'}">${r.paid ? '&#8635;' : '&#10003;'}</button>
+                <input type="date" value="${paidDateVal}" onchange="setPaidDate('${r.id}', this.value)" title="Paid date" style="width:130px;font-size:12px;padding:2px 4px;background:var(--bg2, #1a1a1a);color:inherit;border:1px solid var(--border, #444);border-radius:4px" />
+              </div>
             </td>
             <td style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
               <button class="del-row" onclick="reprintInvoice('${r.id}', 'print')" title="Reprint" style="color:var(--accent)">&#128424;</button>
@@ -2886,6 +2895,35 @@ function togglePaid(historyId) {
   if (!rec) return;
   rec.paid = !rec.paid;
   rec.paidAt = rec.paid ? new Date().toISOString() : null;
+  save();
+  odAutoSave();
+  render();
+}
+
+function toggleSent(historyId) {
+  const rec = (state.invoiceHistory || []).find(h => h.id === historyId);
+  if (!rec) return;
+  rec.sent = !rec.sent;
+  rec.sentAt = rec.sent ? new Date().toISOString() : null;
+  save();
+  odAutoSave();
+  render();
+}
+
+// Lets the actual payment date be corrected after the fact — the checkmark
+// in togglePaid() stamps "today" as a convenience, but that's often not
+// when the client's payment actually cleared/was received.
+function setPaidDate(historyId, dateStr) {
+  const rec = (state.invoiceHistory || []).find(h => h.id === historyId);
+  if (!rec) return;
+  if (!dateStr) { rec.paidAt = null; rec.paid = false; }
+  else {
+    // Preserve time-of-day if one was already set; otherwise noon UTC
+    // avoids the date shifting a day in either direction across timezones.
+    const prevTime = rec.paidAt ? rec.paidAt.slice(10) : 'T12:00:00.000Z';
+    rec.paidAt = dateStr + prevTime;
+    rec.paid = true;
+  }
   save();
   odAutoSave();
   render();
