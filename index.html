@@ -649,12 +649,13 @@ function clearAllData() {
   state = defaultState();
   save();
   render();
+  odAutoSave();
   alert('All data cleared. You can now Import CSV to restore your entries.');
 }
 function loadBackup() {
   try {
     const b = localStorage.getItem('ct_state_backup');
-    if (b) { state = JSON.parse(b); save(); render(); alert('Restored from backup.'); }
+    if (b) { state = JSON.parse(b); save(); render(); odAutoSave(); alert('Restored from backup.'); }
     else alert('No backup found.');
   } catch(e) { alert('Backup restore failed.'); }
 }
@@ -895,14 +896,14 @@ function addClient() {
   if (!rate) { alert('Select a rate.'); return; }
   state.clients.push({ id: uid(), name, rate });
   document.getElementById('newClientName').value = '';
-  save(); render();
+  save(); render(); odAutoSave();
 }
 
 function deleteClient(id) {
   if (!confirm('Delete this client? Their logged entries will remain.')) return;
   state.clients = state.clients.filter(c => c.id !== id);
   if (timerClientId === id) discardTimer();
-  save(); render();
+  save(); render(); odAutoSave();
 }
 
 function selectClient(id) {
@@ -1852,7 +1853,7 @@ function importCSV(event) {
       imported++;
     }
 
-    save(); render();
+    save(); render(); odAutoSave();
     event.target.value = '';
     alert(`Import complete: ${imported} entries added, ${skipped} skipped (duplicates or invalid).`);
   };
@@ -1922,7 +1923,7 @@ function importExpensesCSV(event) {
       imported++;
     }
 
-    save(); render();
+    save(); render(); odAutoSave();
     event.target.value = '';
     alert(`Import complete: ${imported} expenses added, ${skipped} skipped (duplicates or invalid).`);
   };
@@ -1957,6 +1958,7 @@ function resetInvoiceNumbers() {
   state.nextInvoiceNum = 1001;
   state.invoiceNumbers = {};
   save();
+  odAutoSave();
   updateInvoicePreview();
   alert('Invoice numbers reset to INV-1001.');
 }
@@ -1984,6 +1986,7 @@ function getOrAssignInvoiceNumber(key, overrideNum) {
     if (typed || numericPart >= state.nextInvoiceNum) state.nextInvoiceNum = numericPart + 1;
   }
   save();
+  odAutoSave();
   return finalNum;
 }
 
@@ -2302,7 +2305,7 @@ function saveRetainerConfig() {
     billingType: 'retainer',
     retainerAmount, retainerHours, overageRate, retainerStartDate
   };
-  save(); render();
+  save(); render(); odAutoSave();
   alert(`${state.clients[idx].name} is now billed as a retainer client.`);
 }
 
@@ -2312,7 +2315,7 @@ function removeRetainerStatus() {
   if (idx === -1) return;
   if (!confirm(`Switch ${state.clients[idx].name} back to plain hourly billing?`)) return;
   state.clients[idx] = { ...state.clients[idx], billingType: 'hourly' };
-  save(); render();
+  save(); render(); odAutoSave();
 }
 
 // A month already has SOME invoice on record for this client — whether
