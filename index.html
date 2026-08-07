@@ -166,32 +166,28 @@
     .status-pill:hover { border-color: var(--accent2); color: var(--accent2); }
     .status-pill.active { background: rgba(46, 204, 113, .14); color: var(--accent2); border-color: var(--accent2); }
     .status-pill .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .8; }
-    /* Modern date chip: a styled clickable pill showing the formatted date,
-       backed by a fully-hidden native <input type=date> opened via
-       showPicker() — avoids the browser's default unstyled date UI. */
-    .date-chip {
-      display: inline-flex; align-items: center; gap: 5px;
-      padding: 3px 9px 3px 8px; border-radius: 20px;
-      font-size: 0.72rem; font-weight: 500;
-      border: 1px dashed var(--border); background: transparent; color: var(--muted);
-      cursor: pointer; transition: background .12s, border-color .12s, color .12s;
-      width: fit-content; position: relative;
+    /* Modern date chip: a real (visible, always-clickable) native
+       <input type=date>, restyled as a rounded pill to match the rest of
+       the UI. An earlier version hid the input under an invisible overlay
+       to show custom-formatted text instead — that overlay stopped
+       reliably receiving clicks once the row was rebuilt via innerHTML
+       (e.g. right after toggling Paid/Sent), which broke the picker.
+       Using the real input directly avoids that class of bug entirely. */
+    .date-chip { display: inline-flex; align-items: center; gap: 4px; }
+    .date-chip input[type="date"] {
+      font-family: inherit; font-size: 0.72rem; padding: 3px 8px;
+      border-radius: 20px; border: 1px solid var(--border);
+      background: transparent; color: var(--muted); cursor: pointer;
+      color-scheme: dark; transition: background .12s, border-color .12s, color .12s;
     }
-    .date-chip:hover { border-color: var(--accent2); color: var(--accent2); }
-    .date-chip.set {
-      border-style: solid; background: var(--surface2); color: var(--text);
-    }
-    .date-chip svg { width: 12px; height: 12px; flex-shrink: 0; opacity: .75; }
+    .date-chip input[type="date"].set { background: var(--surface2); color: var(--text); border-style: solid; }
+    .date-chip input[type="date"]:hover { border-color: var(--accent2); }
+    .date-chip input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.55); cursor: pointer; }
     .date-chip .clear-date {
-      margin-left: 2px; color: var(--muted); font-size: 0.85rem; line-height: 1;
-      padding: 0 2px; border-radius: 50%; position: relative; z-index: 2;
+      color: var(--muted); font-size: 0.9rem; line-height: 1; cursor: pointer;
+      background: none; border: none; padding: 0 2px;
     }
     .date-chip .clear-date:hover { color: var(--danger); }
-    .date-chip input[type="date"] {
-      position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1;
-      opacity: 0; border: none; padding: 0; margin: 0; cursor: pointer;
-      color-scheme: dark;
-    }
 
     /* ── Summary ── */
     .summary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
@@ -2498,10 +2494,14 @@ function findNextUnbilledFeeMonth(client) {
   }
 }
 
-// Overage invoices are only meaningful once a month is fully over (so all
-// its hours are known) and only if hours actually exceeded the allotment —
-// a month with no overage is simply skipped, never invoiced. Also respects
-// any invoice already on record for that month from the general modal.
+// The Monthly Summary is only meaningful once a month is fully over (so all
+// its hours are known) — but unlike the old overage-only behavior, it's due
+// for EVERY closed month regardless of whether there was overage, mirroring
+// how the Fee invoice is always due regardless of hours. A month with no
+// overage still gets a document (an itemized summary of work done, no
+// charge); the renderer decides whether to show an overage line. Also
+// respects any invoice already on record for that month from the general
+// modal.
 function findNextUnbilledOverageMonth(client) {
   if (!client || client.billingType !== 'retainer' || !client.retainerStartDate) return null;
   const currentMonth = new Date().toISOString().slice(0, 7);
@@ -2509,12 +2509,7 @@ function findNextUnbilledOverageMonth(client) {
   while (true) {
     const monthStr = `${y}-${String(m).padStart(2, '0')}`;
     if (monthStr >= currentMonth) return null; // this month hasn't finished yet
-    if (!monthAlreadyInvoiced(client, monthStr, 'overage')) {
-      const hours = state.entries
-        .filter(e => e.clientId === client.id && e.date.startsWith(monthStr) && isEntryUnderRetainer(client, e))
-        .reduce((s, e) => s + e.minutes, 0) / 60;
-      if (Math.max(0, hours - (client.retainerHours || 0)) > 0) return monthStr;
-    }
+    if (!monthAlreadyInvoiced(client, monthStr, 'overage')) return monthStr;
     m++; if (m > 12) { m = 1; y++; }
   }
 }
@@ -2644,6 +2639,7 @@ function buildOverageInvoiceData(clientId, month) {
 
 function renderOverageInvoiceText(data, invoiceNum) {
   const { client, entries, expenses, hours, includedHours, overageRate, overageHours, overageAmount, expensesTotal, grandTotal, monthLabel } = data;
+  const hasOverage = overageHours > 0;
   const dateGenerated = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
   const COL_W = [12, 8, 18, 12, 20, 8];
   const padR = (s, w) => String(s).slice(0, w).padEnd(w);
@@ -2656,11 +2652,14 @@ function renderOverageInvoiceText(data, invoiceNum) {
     `EXPENSES SUBTOTAL: ${fmtMoney(expensesTotal)}`,
   ].join('\n') : '';
   return [
-    'CONSULTING INVOICE — RETAINER OVERAGE', '======================================', '',
+    hasOverage ? 'CONSULTING INVOICE — RETAINER OVERAGE' : 'MONTHLY SUMMARY — RETAINER WORK',
+    hasOverage ? '======================================' : '================================', '',
     `Invoice #:   ${invoiceNum}`, `Client:      ${client.name}`, `Period:      ${monthLabel}`, `Generated:   ${dateGenerated}`, '',
-    divider, headerRow, divider, entryRows, divider, '',
+    divider, headerRow, divider, (entries.length ? entryRows : '(no hours logged this month)'), divider, '',
     `TOTAL HOURS:      ${hours.toFixed(2)}h (${includedHours}h included)`,
-    `OVERAGE:          ${overageHours.toFixed(2)}h @ ${fmtMoney(overageRate)}/hr = ${fmtMoney(overageAmount)}`,
+    hasOverage
+      ? `OVERAGE:          ${overageHours.toFixed(2)}h @ ${fmtMoney(overageRate)}/hr = ${fmtMoney(overageAmount)}`
+      : `No overage this month — this is a summary of retainer work completed.`,
     expenseLines, '',
     `GRAND TOTAL:      ${fmtMoney(grandTotal)}`, '', '--', 'Cirrobound Solutions',
   ].join('\n');
@@ -2668,6 +2667,7 @@ function renderOverageInvoiceText(data, invoiceNum) {
 
 function renderOverageInvoiceHtml(data, invoiceNum, isPreview) {
   const { client, entries, expenses, hours, includedHours, overageRate, overageHours, overageAmount, expensesTotal, grandTotal, monthLabel } = data;
+  const hasOverage = overageHours > 0;
   const dateGenerated = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
   const rows = entries.map(e => `
       <tr>
@@ -2676,17 +2676,20 @@ function renderOverageInvoiceHtml(data, invoiceNum, isPreview) {
       </tr>`).join('');
   const expenseRows = expenses.map(e => `
       <tr><td>${fmtDate(e.date)}</td><td>${e.category}</td><td>${e.description || '—'}</td><td>${fmtMoney(e.amount)}</td></tr>`).join('');
+  const summaryRow = hasOverage
+    ? `<tr class="total-row">
+          <td colspan="5">Overage (${overageHours.toFixed(2)}h @ ${fmtMoney(overageRate)}/hr)</td>
+          <td>${fmtMoney(overageAmount)}</td>
+        </tr>`
+    : `<tr><td colspan="6" style="color:#555;font-style:italic">No overage this month — this is a summary of the ${hours.toFixed(1)}h of retainer work completed.</td></tr>`;
   return `<!DOCTYPE html><html><head><title>Invoice – ${client.name}</title><style>${INVOICE_STYLE}</style></head><body>
     ${previewBannerHtml(isPreview)}
-    ${invoiceHeaderHtml(client.name, invoiceNum, 'Consulting Invoice — Retainer Overage')}
+    ${invoiceHeaderHtml(client.name, invoiceNum, hasOverage ? 'Consulting Invoice — Retainer Overage' : 'Monthly Summary — Retainer Work')}
     <p class="meta">${monthLabel} &nbsp;·&nbsp; ${hours.toFixed(1)}h logged (${includedHours}h included) &nbsp;·&nbsp; ${dateGenerated}</p>
     <table>
       <thead><tr><th>Date</th><th>Time</th><th>Event</th><th>Location</th><th>Description</th><th>Duration</th></tr></thead>
       <tbody>${rows}
-        <tr class="total-row">
-          <td colspan="5">Overage (${overageHours.toFixed(2)}h @ ${fmtMoney(overageRate)}/hr)</td>
-          <td>${fmtMoney(overageAmount)}</td>
-        </tr>
+        ${summaryRow}
       </tbody>
     </table>
     ${expenses.length ? `
@@ -2705,10 +2708,11 @@ function renderOverageInvoiceHtml(data, invoiceNum, isPreview) {
 function generateOverageInvoice(clientId, month, mode, invoiceNumOverride) {
   const data = buildOverageInvoiceData(clientId, month);
   if (!data) return;
+  const hasOverage = data.overageHours > 0;
   const key = `${clientId}-${month}-overage`;
   const invoiceNum = getOrAssignInvoiceNumber(key, invoiceNumOverride);
   if (mode === 'email') {
-    sendInvoiceMailto(`${invoiceNum} – ${data.client.name} – ${data.monthLabel} Overage`, renderOverageInvoiceText(data, invoiceNum));
+    sendInvoiceMailto(`${invoiceNum} – ${data.client.name} – ${data.monthLabel}${hasOverage ? ' Overage' : ' Summary'}`, renderOverageInvoiceText(data, invoiceNum));
   } else {
     openInvoiceWindow(renderOverageInvoiceHtml(data, invoiceNum, false));
   }
@@ -2736,12 +2740,12 @@ function generateOverageInvoiceForClient(clientId, mode) {
   if (!client) return;
   const month = findNextUnbilledOverageMonth(client);
   if (!month) {
-    alert('No overage invoice due right now — either the month isn\'t finished yet, or there was no overage.');
+    alert('No monthly summary due right now — the current month isn\'t finished yet.');
     return;
   }
   const key = `${clientId}-${month}-overage`;
   const suggested = (state.invoiceNumbers && state.invoiceNumbers[key]) || `INV-${state.nextInvoiceNum || 1001}`;
-  const typed = prompt('Invoice number for this Overage invoice (edit if it needs to be out of the usual order):', suggested);
+  const typed = prompt('Invoice number for this Monthly Summary invoice (edit if it needs to be out of the usual order):', suggested);
   if (typed === null) return; // cancelled
   generateOverageInvoice(clientId, month, mode, typed);
 }
@@ -2758,7 +2762,7 @@ function renderRetainersList() {
     <table>
       <thead><tr>
         <th>Client</th><th>Retainer</th><th>Included</th><th>Overage Rate</th>
-        <th>Starts</th><th>This Month</th><th>Fee Invoice</th><th>Overage Invoice</th>
+        <th>Starts</th><th>This Month</th><th>Fee Invoice</th><th>Monthly Summary</th>
       </tr></thead>
       <tbody>
         ${retainerClients.map(c => {
@@ -2786,7 +2790,7 @@ function renderRetainersList() {
               </div>
             </td>
             <td>
-              <div style="margin-bottom:6px">${overageMonth ? monthLabel(overageMonth) : '<span style="color:var(--muted)">None due</span>'}</div>
+              <div style="margin-bottom:6px">${overageMonth ? monthLabel(overageMonth) : '<span style="color:var(--muted)">Caught up</span>'}</div>
               <div style="display:flex;gap:6px">
                 <button class="btn btn-ghost btn-sm" onclick="previewOverageInvoice('${c.id}', '${overageMonth || currentMonth}')" style="color:var(--muted)">Preview</button>
                 <button class="btn btn-primary btn-sm" onclick="generateOverageInvoiceForClient('${c.id}', 'print')" ${overageMonth ? '' : 'disabled'}>Generate</button>
@@ -2810,15 +2814,10 @@ function renderRetainersList() {
 // the same setter with an empty string to clear it.
 function dateChipHtml(historyId, isoDate, setterFn, label) {
   const dateVal = isoDate ? isoDate.slice(0, 10) : '';
-  const displayText = dateVal
-    ? new Date(dateVal + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-    : 'Set date';
   return `
-    <span class="date-chip ${dateVal ? 'set' : ''}" title="${label}">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>
-      ${displayText}
-      ${dateVal ? `<span class="clear-date" onclick="event.stopPropagation();${setterFn}('${historyId}','')">&times;</span>` : ''}
-      <input type="date" value="${dateVal}" onchange="${setterFn}('${historyId}', this.value)" onclick="event.stopPropagation()" />
+    <span class="date-chip">
+      <input type="date" class="${dateVal ? 'set' : ''}" value="${dateVal}" onchange="${setterFn}('${historyId}', this.value)" title="${label}" />
+      ${dateVal ? `<button class="clear-date" onclick="${setterFn}('${historyId}','')" title="Clear ${label.toLowerCase()}">&times;</button>` : ''}
     </span>`;
 }
 
@@ -2841,7 +2840,7 @@ function renderInvoiceHistory() {
 
   if (!records.length) { body.innerHTML = '<p class="empty">No invoices generated yet.</p>'; return; }
 
-  const kindLabel = { general: 'General', fee: 'Fee', overage: 'Overage' };
+  const kindLabel = { general: 'General', fee: 'Fee', overage: 'Monthly Summary' };
 
   body.innerHTML = `
     <table>
