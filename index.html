@@ -2842,7 +2842,10 @@ function renderInvoiceHistory() {
   let records = state.invoiceHistory || [];
   if (filterClient) records = records.filter(r => r.clientId === filterClient);
   if (!showVoided) records = records.filter(r => !r.voided);
-  records = [...records].sort((a, b) => (b.generatedAt || '').localeCompare(a.generatedAt || '') || b.invoiceNum.localeCompare(a.invoiceNum));
+  // Always ordered lowest → highest invoice number, not by date generated —
+  // numeric compare (not string) so e.g. INV-999 sorts before INV-1000.
+  const invoiceNumSortKey = n => parseInt(String(n).replace(/[^0-9]/g, ''), 10) || 0;
+  records = [...records].sort((a, b) => invoiceNumSortKey(a.invoiceNum) - invoiceNumSortKey(b.invoiceNum));
 
   if (!records.length) {
     body.innerHTML = `<p class="empty">${(state.invoiceHistory || []).length && !showVoided ? 'No invoices to show — try "Show voided".' : 'No invoices generated yet.'}</p>`;
