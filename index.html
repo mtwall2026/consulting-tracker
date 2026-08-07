@@ -2964,6 +2964,13 @@ function voidInvoiceHistory(historyId) {
   alert(`${label} voided. That period is now available to invoice again.`);
 }
 
+// These only affect the Invoice History table, so they re-render just that
+// table (renderInvoiceHistory()) rather than the full app render() — a full
+// render rebuilds every tab (clients, time log, charts, retainers,
+// expenses, ...) on every single click, which is needless work for a field
+// toggle and was the likely cause of clicks occasionally feeling like they
+// "didn't register": a slow full re-render leaves a window where a quick
+// follow-up click lands on an element that's mid-replacement.
 function togglePaid(historyId) {
   const rec = (state.invoiceHistory || []).find(h => h.id === historyId);
   if (!rec) return;
@@ -2971,7 +2978,7 @@ function togglePaid(historyId) {
   rec.paidAt = rec.paid ? new Date().toISOString() : null;
   save();
   odAutoSave();
-  render();
+  renderInvoiceHistory();
 }
 
 function toggleSent(historyId) {
@@ -2981,7 +2988,7 @@ function toggleSent(historyId) {
   rec.sentAt = rec.sent ? new Date().toISOString() : null;
   save();
   odAutoSave();
-  render();
+  renderInvoiceHistory();
 }
 
 // Lets the actual payment date be corrected after the fact — the checkmark
@@ -3000,7 +3007,7 @@ function setPaidDate(historyId, dateStr) {
   }
   save();
   odAutoSave();
-  render();
+  renderInvoiceHistory();
 }
 
 // Mirrors setPaidDate() for the Sent date chip.
@@ -3015,7 +3022,7 @@ function setSentDate(historyId, dateStr) {
   }
   save();
   odAutoSave();
-  render();
+  renderInvoiceHistory();
 }
 
 // Uploads the payment document as its own file into a Payments folder in
@@ -3046,7 +3053,7 @@ async function uploadPaymentDocument(historyId, file) {
     if (!rec.paid) { rec.paid = true; rec.paidAt = new Date().toISOString(); }
     save();
     odAutoSave();
-    render();
+    renderInvoiceHistory();
     alert(`Payment document uploaded and linked to ${rec.invoiceNum}.`);
   } catch(e) {
     alert('Upload failed: ' + e.message);
