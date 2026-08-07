@@ -591,11 +591,6 @@
       <button class="btn btn-primary" onclick="saveRetainerConfig()" style="align-self:flex-end">Save Retainer</button>
       <button class="btn btn-ghost" onclick="removeRetainerStatus()" style="align-self:flex-end;color:var(--danger)">Remove Retainer Status</button>
     </div>
-    <div class="manual-row" style="margin-top:10px">
-      <label style="flex:1;min-width:280px">Scope of Engagement (shown on the Fee invoice)
-        <textarea id="retainerDescriptionInput" rows="2" placeholder="e.g. Cirrobound Solutions will provide ongoing AI advisory services to [Client] on a monthly basis. This includes strategic guidance on AI implementation, roadmap planning, and consulting support as the program develops." style="width:100%;resize:vertical;font-family:inherit"></textarea>
-      </label>
-    </div>
   </div>
 
   <!-- Retainer Clients -->
@@ -2488,7 +2483,6 @@ function loadRetainerConfigIntoForm() {
   document.getElementById('retainerHoursInput').value = (c && c.retainerHours) || '';
   document.getElementById('retainerOverageRateInput').value = (c && c.overageRate) || '';
   document.getElementById('retainerStartDateInput').value = (c && c.retainerStartDate) || '';
-  document.getElementById('retainerDescriptionInput').value = (c && c.retainerDescription) || '';
 }
 
 function saveRetainerConfig() {
@@ -2501,17 +2495,33 @@ function saveRetainerConfig() {
   const overageRateInput = document.getElementById('retainerOverageRateInput').value;
   const overageRate = overageRateInput ? parseFloat(overageRateInput) : state.clients[idx].rate;
   const retainerStartDate = document.getElementById('retainerStartDateInput').value || '';
-  const retainerDescription = document.getElementById('retainerDescriptionInput').value.trim();
 
   if (!retainerAmount || retainerAmount <= 0) { alert('Enter a retainer amount.'); return; }
 
+  // retainerDescription is intentionally NOT set here — it's edited inline
+  // per client in the Retainer Clients list below (saveRetainerDescription),
+  // so this spread just preserves whatever is already on the client record.
   state.clients[idx] = {
     ...state.clients[idx],
     billingType: 'retainer',
-    retainerAmount, retainerHours, overageRate, retainerStartDate, retainerDescription
+    retainerAmount, retainerHours, overageRate, retainerStartDate
   };
   save(); render(); odAutoSave();
   alert(`${state.clients[idx].name} is now billed as a retainer client.`);
+}
+
+// Edited inline per client in the Retainer Clients list (not the Setup
+// form above it) — saves on blur, no confirmation dialog, no re-render
+// (the textarea already shows what was just typed, so there's nothing to
+// refresh and re-rendering would just risk losing scroll position/focus).
+function saveRetainerDescription(clientId, value) {
+  const idx = state.clients.findIndex(c => c.id === clientId);
+  if (idx === -1) return;
+  const trimmed = value.trim();
+  if ((state.clients[idx].retainerDescription || '') === trimmed) return;
+  state.clients[idx] = { ...state.clients[idx], retainerDescription: trimmed };
+  save();
+  odAutoSave();
 }
 
 function removeRetainerStatus() {
@@ -2893,6 +2903,14 @@ function renderRetainersList() {
                 <button class="btn btn-ghost btn-sm" onclick="previewOverageInvoice('${c.id}', '${overageMonth || currentMonth}')" style="color:var(--muted)">Preview</button>
                 <button class="btn btn-primary btn-sm" onclick="generateOverageInvoiceForClient('${c.id}', 'print')" ${overageMonth ? '' : 'disabled'}>Generate</button>
                 <button class="btn btn-ghost btn-sm" onclick="generateOverageInvoiceForClient('${c.id}', 'email')" ${overageMonth ? '' : 'disabled'}>Email</button>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td colspan="8" style="padding-top:0">
+              <div style="display:flex;gap:10px;align-items:flex-start;padding-top:2px">
+                <span style="font-size:0.72rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);white-space:nowrap;padding-top:7px">Scope of Engagement</span>
+                <textarea rows="1" placeholder="What this client's retainer covers — shown on their invoices" onblur="saveRetainerDescription('${c.id}', this.value)" style="flex:1;resize:vertical;font-family:inherit;font-size:0.85rem;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 10px;outline:none">${c.retainerDescription || ''}</textarea>
               </div>
             </td>
           </tr>`;
