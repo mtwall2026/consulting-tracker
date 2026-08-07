@@ -609,6 +609,10 @@
       <h2 style="margin-bottom:0">Invoice History</h2>
       <div class="filter-row">
         <select id="filterInvoiceHistoryClient" onchange="renderInvoiceHistory()"><option value="">All clients</option></select>
+        <label style="display:flex;align-items:center;gap:6px;font-size:0.85rem;color:var(--muted);cursor:pointer">
+          <input type="checkbox" id="showVoidedInvoices" onchange="renderInvoiceHistory()" />
+          Show voided
+        </label>
       </div>
     </div>
     <div id="invoiceHistoryBody"></div>
@@ -2834,11 +2838,16 @@ function renderInvoiceHistory() {
   if (filterPrev) filterEl.value = filterPrev;
 
   const filterClient = filterEl.value;
+  const showVoided = document.getElementById('showVoidedInvoices').checked;
   let records = state.invoiceHistory || [];
   if (filterClient) records = records.filter(r => r.clientId === filterClient);
+  if (!showVoided) records = records.filter(r => !r.voided);
   records = [...records].sort((a, b) => (b.generatedAt || '').localeCompare(a.generatedAt || '') || b.invoiceNum.localeCompare(a.invoiceNum));
 
-  if (!records.length) { body.innerHTML = '<p class="empty">No invoices generated yet.</p>'; return; }
+  if (!records.length) {
+    body.innerHTML = `<p class="empty">${(state.invoiceHistory || []).length && !showVoided ? 'No invoices to show — try "Show voided".' : 'No invoices generated yet.'}</p>`;
+    return;
+  }
 
   const kindLabel = { general: 'General', fee: 'Fee', overage: 'Monthly Summary' };
 
