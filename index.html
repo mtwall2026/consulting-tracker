@@ -2921,7 +2921,7 @@ function renderInvoiceHistory() {
               <td>${r.invoiceNum}</td>
               <td>${generatedLabel}</td>
               <td><span class="badge" style="background:#3a1e1e;color:var(--danger)">VOIDED</span></td>
-              <td></td>
+              <td><button class="del-row" onclick="deleteInvoiceHistory('${r.id}')" title="Permanently delete and free up ${r.invoiceNum} for reuse" style="color:var(--danger)">Delete</button></td>
             </tr>`;
           }
           return `
@@ -2956,6 +2956,7 @@ function renderInvoiceHistory() {
                    <button class="del-row" onclick="document.getElementById('payDoc-${r.id}').click()" title="Upload payment document">&#128228;</button>`
               }
               <button class="del-row" onclick="voidInvoiceHistory('${r.id}')" title="Void">Void</button>
+              <button class="del-row" onclick="deleteInvoiceHistory('${r.id}')" title="Permanently delete and free up ${r.invoiceNum} for reuse" style="color:var(--danger)">Delete</button>
             </td>
           </tr>`;
         }).join('')}
@@ -3012,6 +3013,37 @@ function voidInvoiceHistory(historyId) {
   odAutoSave();
   render();
   alert(`${label} voided. That period is now available to invoice again.`);
+}
+
+// Unlike Void — which keeps a "voided" audit record and permanently retires
+// the number so it can never collide with anything — this completely
+// erases the record and frees its exact invoice number for reuse. Use this
+// only to fully undo a mistake (duplicate/test entry) that should leave no
+// trace at all; anything that was actually sent to a client should be
+// Voided instead, never deleted, so the number gap stays explained.
+function deleteInvoiceHistory(historyId) {
+  const rec = (state.invoiceHistory || []).find(h => h.id === historyId);
+  if (!rec) return;
+  const label = `${rec.invoiceNum} (${rec.clientName}${rec.month ? ' – ' + rec.month : ' – All Time'})`;
+  if (!confirm(
+    `Permanently delete ${label}?\n\n` +
+    `Unlike Void, this completely erases the record — no audit trail — and frees ${rec.invoiceNum} ` +
+    `to be reused as a fresh number on a future invoice. Use this ONLY to fully undo a mistake, ` +
+    `never an invoice that was actually sent to a client (use Void for that instead). This cannot be undone.`
+  )) return;
+
+  // Only clear invoiceNumbers[key] if it still points at THIS record's
+  // number — guards against wiping out a newer invoice that reused the key
+  // after this one was voided.
+  if (state.invoiceNumbers && state.invoiceNumbers[rec.key] === rec.invoiceNum) {
+    delete state.invoiceNumbers[rec.key];
+  }
+  state.invoiceHistory = state.invoiceHistory.filter(h => h.id !== historyId);
+
+  save();
+  odAutoSave();
+  render();
+  alert(`${label} permanently deleted. ${rec.invoiceNum} can now be reused.`);
 }
 
 // These only affect the Invoice History table, so they re-render just that
