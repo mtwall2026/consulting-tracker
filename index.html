@@ -102,7 +102,7 @@
     /* ── Manual entry ── */
     .manual-row { display: flex; gap: 8px; flex-wrap: nowrap; align-items: flex-end; overflow-x: auto; }
     .manual-row label { display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; color: var(--muted); }
-    .manual-row input, .manual-row select {
+    .manual-row input, .manual-row select, .manual-row textarea {
       background: var(--surface2);
       border: 1px solid var(--border);
       border-radius: 6px;
@@ -111,7 +111,7 @@
       font-size: 0.9rem;
       outline: none;
     }
-    .manual-row input:focus, .manual-row select:focus { border-color: var(--accent); }
+    .manual-row input:focus, .manual-row select:focus, .manual-row textarea:focus { border-color: var(--accent); }
 
     /* ── Buttons ── */
     .btn {
@@ -590,6 +590,11 @@
       </label>
       <button class="btn btn-primary" onclick="saveRetainerConfig()" style="align-self:flex-end">Save Retainer</button>
       <button class="btn btn-ghost" onclick="removeRetainerStatus()" style="align-self:flex-end;color:var(--danger)">Remove Retainer Status</button>
+    </div>
+    <div class="manual-row" style="margin-top:10px">
+      <label style="flex:1;min-width:280px">Scope of Engagement (shown on the Fee invoice)
+        <textarea id="retainerDescriptionInput" rows="2" placeholder="e.g. Cirrobound Solutions will provide ongoing AI advisory services to [Client] on a monthly basis. This includes strategic guidance on AI implementation, roadmap planning, and consulting support as the program develops." style="width:100%;resize:vertical;font-family:inherit"></textarea>
+      </label>
     </div>
   </div>
 
@@ -2483,6 +2488,7 @@ function loadRetainerConfigIntoForm() {
   document.getElementById('retainerHoursInput').value = (c && c.retainerHours) || '';
   document.getElementById('retainerOverageRateInput').value = (c && c.overageRate) || '';
   document.getElementById('retainerStartDateInput').value = (c && c.retainerStartDate) || '';
+  document.getElementById('retainerDescriptionInput').value = (c && c.retainerDescription) || '';
 }
 
 function saveRetainerConfig() {
@@ -2495,13 +2501,14 @@ function saveRetainerConfig() {
   const overageRateInput = document.getElementById('retainerOverageRateInput').value;
   const overageRate = overageRateInput ? parseFloat(overageRateInput) : state.clients[idx].rate;
   const retainerStartDate = document.getElementById('retainerStartDateInput').value || '';
+  const retainerDescription = document.getElementById('retainerDescriptionInput').value.trim();
 
   if (!retainerAmount || retainerAmount <= 0) { alert('Enter a retainer amount.'); return; }
 
   state.clients[idx] = {
     ...state.clients[idx],
     billingType: 'retainer',
-    retainerAmount, retainerHours, overageRate, retainerStartDate
+    retainerAmount, retainerHours, overageRate, retainerStartDate, retainerDescription
   };
   save(); render(); odAutoSave();
   alert(`${state.clients[idx].name} is now billed as a retainer client.`);
@@ -2581,6 +2588,12 @@ const INVOICE_STYLE = `
     .fee-box .amount { font-size: 1.6rem; font-weight: 800; }
     .fee-box .note { color: #555; font-size: 0.85rem; margin-top: 6px; }
     .grand-total { text-align: right; margin-top: 24px; font-size: 1.2rem; font-weight: 800; }
+    .bill-to-row { display: flex; justify-content: space-between; margin-bottom: 24px; }
+    .field-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: .07em; color: #999; margin-bottom: 3px; font-weight: 700; }
+    .bill-to-row .value { font-weight: 700; font-size: 1.05rem; }
+    .bill-to-row .right { text-align: right; }
+    .engagement-box { border-left: 3px solid #111; padding: 2px 22px; margin: 22px 0 26px; }
+    .engagement-box p { margin: 0; line-height: 1.65; color: #333; font-size: 0.92rem; }
     @media print { body { padding: 20px; } }`;
 
 function invoiceHeaderHtml(clientName, invoiceNum, subtitle) {
@@ -2622,27 +2635,44 @@ function buildFeeInvoiceData(clientId, month) {
   const monthLabel = new Date(month + '-02').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   const fee = client.retainerAmount || 0;
   const planNote = `Includes ${client.retainerHours || 0}h/mo, overage billed at ${fmtMoney(client.overageRate || client.rate)}/hr`;
-  return { client, fee, monthLabel, planNote };
+  const retainerDescription = client.retainerDescription || '';
+  return { client, fee, monthLabel, planNote, retainerDescription };
 }
 
 function renderFeeInvoiceText(data, invoiceNum) {
-  const { client, fee, monthLabel, planNote } = data;
+  const { client, fee, monthLabel, planNote, retainerDescription } = data;
   const dateGenerated = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
   return [
     'CONSULTING INVOICE — RETAINER FEE', '==================================', '',
-    `Invoice #:   ${invoiceNum}`, `Client:      ${client.name}`, `Period:      ${monthLabel}`, `Generated:   ${dateGenerated}`, '',
+    `Invoice #:   ${invoiceNum}`, `Bill To:     ${client.name}`, `Period:      ${monthLabel}`, `Invoice Date: ${dateGenerated}`, '',
+    ...(retainerDescription ? ['SCOPE OF ENGAGEMENT', retainerDescription, ''] : []),
     `RETAINER FEE: ${fmtMoney(fee)}`, `  ${planNote}`, '',
     `GRAND TOTAL:  ${fmtMoney(fee)}`, '', '--', 'Cirrobound Solutions',
   ].join('\n');
 }
 
 function renderFeeInvoiceHtml(data, invoiceNum, isPreview) {
-  const { client, fee, monthLabel, planNote } = data;
+  const { client, fee, monthLabel, planNote, retainerDescription } = data;
   const dateGenerated = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
   return `<!DOCTYPE html><html><head><title>Invoice – ${client.name}</title><style>${INVOICE_STYLE}</style></head><body>
     ${previewBannerHtml(isPreview)}
     ${invoiceHeaderHtml(client.name, invoiceNum, 'Consulting Invoice — Retainer Fee')}
-    <p class="meta">${monthLabel} &nbsp;·&nbsp; ${dateGenerated}</p>
+    <div class="bill-to-row">
+      <div>
+        <div class="field-label">Bill To</div>
+        <div class="value">${client.name}</div>
+      </div>
+      <div class="right">
+        <div class="field-label">Billing Period</div>
+        <div class="value">${monthLabel}</div>
+        <div style="color:#888;font-size:0.8rem;margin-top:2px">Invoice Date: ${dateGenerated}</div>
+      </div>
+    </div>
+    ${retainerDescription ? `
+    <div class="engagement-box">
+      <div class="field-label">Scope of Engagement</div>
+      <p>${retainerDescription}</p>
+    </div>` : ''}
     <div class="fee-box">
       <div class="amount">${fmtMoney(fee)}</div>
       <div class="note">Monthly Retainer Fee — ${planNote}</div>
