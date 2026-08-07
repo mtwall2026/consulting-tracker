@@ -2880,7 +2880,14 @@ function dateChipHtml(historyId, isoDate, setterFn, label) {
 // invoice was generated — not the client's CURRENT billing type, which
 // could have changed since (e.g. converted to retainer afterward).
 function invoiceKindLabel(r) {
-  if (r.kind === 'fee' || r.kind === 'overage') return 'Retainer';
+  if (r.kind === 'fee') return 'Retainer';
+  if (r.kind === 'overage') {
+    // The Monthly Summary document doubles as the overage invoice when a
+    // month actually went over — flag those specifically so they stand
+    // out from a plain no-charge summary or the flat Fee invoice.
+    const overageHours = r.snapshot && r.snapshot.overageHours;
+    return overageHours > 0 ? 'Hours Over' : 'Retainer';
+  }
   const billingType = r.snapshot && r.snapshot.client && r.snapshot.client.billingType;
   return billingType === 'retainer' ? 'Retainer' : 'Hourly';
 }
