@@ -2872,6 +2872,19 @@ function dateChipHtml(historyId, isoDate, setterFn, label) {
     </span>`;
 }
 
+// The Kind column shows just "Retainer" or "Hourly" — Fee and Monthly
+// Summary invoices only ever exist for retainer clients, so those are
+// always "Retainer". A General invoice (from the header Print Invoice
+// modal) can be for either kind of client, so it's determined from the
+// client's billing type captured in the frozen snapshot at the time this
+// invoice was generated — not the client's CURRENT billing type, which
+// could have changed since (e.g. converted to retainer afterward).
+function invoiceKindLabel(r) {
+  if (r.kind === 'fee' || r.kind === 'overage') return 'Retainer';
+  const billingType = r.snapshot && r.snapshot.client && r.snapshot.client.billingType;
+  return billingType === 'retainer' ? 'Retainer' : 'Hourly';
+}
+
 function renderInvoiceHistory() {
   const body = document.getElementById('invoiceHistoryBody');
   if (!body) return;
@@ -2899,8 +2912,6 @@ function renderInvoiceHistory() {
     return;
   }
 
-  const kindLabel = { general: 'General', fee: 'Fee', overage: 'Monthly Summary' };
-
   body.innerHTML = `
     <table>
       <thead><tr>
@@ -2916,7 +2927,7 @@ function renderInvoiceHistory() {
             return `
             <tr style="opacity:0.5">
               <td>${r.clientName}</td>
-              <td>${kindLabel[r.kind] || r.kind}</td>
+              <td>${invoiceKindLabel(r)}</td>
               <td>${periodLabel}</td>
               <td>${r.invoiceNum}</td>
               <td>${generatedLabel}</td>
@@ -2927,7 +2938,7 @@ function renderInvoiceHistory() {
           return `
           <tr>
             <td><span class="badge">${r.clientName}</span></td>
-            <td>${kindLabel[r.kind] || r.kind}</td>
+            <td>${invoiceKindLabel(r)}</td>
             <td>${periodLabel}</td>
             <td>${r.invoiceNum}</td>
             <td>${generatedLabel}</td>
