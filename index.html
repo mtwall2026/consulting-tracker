@@ -275,6 +275,7 @@
       <button class="btn btn-ghost btn-sm" onclick="resetInvoiceNumbers()" style="color:var(--danger);font-size:0.78rem">Reset Invoice #</button>
       <div style="display:flex;gap:10px">
         <button class="btn btn-ghost" onclick="closeInvoiceModal()">Cancel</button>
+        <button class="btn btn-ghost" onclick="previewGeneralInvoice()" style="color:var(--muted)">&#128065; Preview</button>
         <button class="btn btn-ghost" onclick="emailInvoice()" style="color:var(--accent2)">&#9993; Email</button>
         <button class="btn btn-primary" onclick="confirmInvoice()">Generate</button>
       </div>
@@ -319,6 +320,7 @@
     <button class="view-tab active" id="tabTimeTracking" onclick="switchView('timeTracking')">Time Tracking</button>
     <button class="view-tab" id="tabRetainers" onclick="switchView('retainers')">Retainers</button>
     <button class="view-tab" id="tabExpenses" onclick="switchView('expenses')">Expenses</button>
+    <button class="view-tab" id="tabInvoiceHistory" onclick="switchView('invoiceHistory')">Invoice History</button>
   </div>
 
   <!-- Team View (manager account only) — visible on either tab, since it
@@ -563,6 +565,21 @@
 
   </div> <!-- /viewRetainers -->
 
+  <!-- ══════════════ Invoice History page ══════════════ -->
+  <div id="viewInvoiceHistory" style="display:none">
+
+  <div class="card">
+    <div class="log-header">
+      <h2 style="margin-bottom:0">Invoice History</h2>
+      <div class="filter-row">
+        <select id="filterInvoiceHistoryClient" onchange="renderInvoiceHistory()"><option value="">All clients</option></select>
+      </div>
+    </div>
+    <div id="invoiceHistoryBody"></div>
+  </div>
+
+  </div> <!-- /viewInvoiceHistory -->
+
 </div>
 
 <script>
@@ -592,14 +609,17 @@ function switchView(view) {
   document.getElementById('viewTimeTracking').style.display = view === 'timeTracking' ? '' : 'none';
   document.getElementById('viewExpenses').style.display = view === 'expenses' ? '' : 'none';
   document.getElementById('viewRetainers').style.display = view === 'retainers' ? '' : 'none';
+  document.getElementById('viewInvoiceHistory').style.display = view === 'invoiceHistory' ? '' : 'none';
   document.getElementById('tabTimeTracking').classList.toggle('active', view === 'timeTracking');
   document.getElementById('tabExpenses').classList.toggle('active', view === 'expenses');
   document.getElementById('tabRetainers').classList.toggle('active', view === 'retainers');
+  document.getElementById('tabInvoiceHistory').classList.toggle('active', view === 'invoiceHistory');
   // Chart.js can't size a canvas correctly while its container is
   // display:none, so redraw whichever page's charts just became visible.
   if (view === 'timeTracking') renderCharts();
   else if (view === 'expenses') renderExpenseCharts();
-  else renderRetainersList();
+  else if (view === 'retainers') renderRetainersList();
+  else renderInvoiceHistory();
 }
 
 // ── Team View (manager account only) ───────────────────
@@ -620,6 +640,7 @@ function load() {
 // needs to backfill it so `.expenses` is never undefined.
 function migrateState(s) {
   if (!s.expenses) s.expenses = [];
+  if (!s.invoiceHistory) s.invoiceHistory = [];
   return s;
 }
 function defaultState() {
@@ -627,6 +648,7 @@ function defaultState() {
     clients: [{ id: uid(), name: 'Century 3', rate: 200 }],
     entries: [],
     expenses: [],
+    invoiceHistory: [],
     nextInvoiceNum: 1001
   };
 }
@@ -784,6 +806,7 @@ function render() {
   renderExpenseLog();
   renderExpenseSummary();
   renderRetainersList();
+  renderInvoiceHistory();
   // Chart.js can't size a canvas correctly while its container is
   // display:none, so only (re)build charts for the currently visible
   // page — switchView() renders the other page's charts on demand.
@@ -1990,45 +2013,38 @@ function getOrAssignInvoiceNumber(key, overrideNum) {
   return finalNum;
 }
 
-// ── Email Invoice ──────────────────────────────────────
-// explicitClientId/explicitMonth let the Retainers tab's "Generate Next
-// Invoice" reuse this exact same invoice logic instead of requiring the
-// client+month picker modal.
-function emailInvoice(explicitClientId, explicitMonth) {
-  const filterClient = explicitClientId || document.getElementById('invoiceClientPick').value;
-  const filterMonth   = explicitMonth !== undefined ? explicitMonth : document.getElementById('invoiceMonthPick').value;
-  // Only the modal-triggered call has a typed override to honor.
-  const typedInvoiceNum = explicitClientId ? null : document.getElementById('invoiceNumInput').value;
-  closeInvoiceModal();
-  if (!filterClient) return;
-
-  const invoiceKey = `${filterClient}-${filterMonth || 'all'}`;
-  const invoiceNum = getOrAssignInvoiceNumber(invoiceKey, typedInvoiceNum);
-
-  const client = state.clients.find(c => c.id === filterClient);
+// ── Invoice content builders (pure — no DOM, no state writes) ──
+// Reused by Generate, Email, Preview, and Reprint, so all four always
+// show identical content for identical inputs.
+function buildGeneralInvoiceData(clientId, month) {
+  const client = state.clients.find(c => c.id === clientId);
   const clientName = client ? client.name : 'Client';
 
-  let entries = state.entries.filter(e => e.clientId === filterClient);
-  if (filterMonth) entries = entries.filter(e => e.date.startsWith(filterMonth));
+  let entries = state.entries.filter(e => e.clientId === clientId);
+  if (month) entries = entries.filter(e => e.date.startsWith(month));
   entries = [...entries].sort((a, b) => a.date.localeCompare(b.date));
 
-  let expenses = state.expenses.filter(e => e.clientId === filterClient);
-  if (filterMonth) expenses = expenses.filter(e => e.date.startsWith(filterMonth));
+  let expenses = state.expenses.filter(e => e.clientId === clientId);
+  if (month) expenses = expenses.filter(e => e.date.startsWith(month));
   expenses = [...expenses].sort((a, b) => a.date.localeCompare(b.date));
 
   const totalMin = entries.reduce((s, e) => s + e.minutes, 0);
-  const billing = calcClientBilling(client, entries, filterMonth || undefined);
+  const billing = calcClientBilling(client, entries, month || undefined);
   const totalAmt = billing.amount;
   const expensesTotal = expenses.reduce((s, e) => s + e.amount, 0);
   const grandTotal = totalAmt + expensesTotal;
 
-  const monthLabel = filterMonth
-    ? new Date(filterMonth + '-02').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+  const monthLabel = month
+    ? new Date(month + '-02').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
     : 'All Time';
 
+  return { client, clientName, entries, expenses, totalMin, billing, totalAmt, expensesTotal, grandTotal, monthLabel };
+}
+
+function renderGeneralInvoiceText(data, invoiceNum) {
+  const { client, clientName, entries, expenses, totalMin, billing, totalAmt, expensesTotal, grandTotal, monthLabel } = data;
   const dateGenerated = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
 
-  // Build plain-text invoice body
   const COL_W = [12, 8, 18, 12, 20, 8, 10, 10];
   function padR(s, w) { return String(s).slice(0, w).padEnd(w); }
 
@@ -2100,7 +2116,7 @@ function emailInvoice(explicitClientId, explicitMonth) {
     `EXPENSES SUBTOTAL: ${fmtMoney(expensesTotal)}`,
   ].join('\n') : '';
 
-  const body = [
+  return [
     'CONSULTING INVOICE',
     '==================',
     '',
@@ -2124,42 +2140,10 @@ function emailInvoice(explicitClientId, explicitMonth) {
     '--',
     'Cirrobound Solutions',
   ].join('\n');
-
-  const subject = encodeURIComponent(`${invoiceNum} – ${clientName} – ${monthLabel}`);
-  const bodyEnc = encodeURIComponent(body);
-  window.location.href = `mailto:?subject=${subject}&body=${bodyEnc}`;
 }
 
-function confirmInvoice(explicitClientId, explicitMonth) {
-  const filterClient = explicitClientId || document.getElementById('invoiceClientPick').value;
-  const filterMonth   = explicitMonth !== undefined ? explicitMonth : document.getElementById('invoiceMonthPick').value;
-  const typedInvoiceNum = explicitClientId ? null : document.getElementById('invoiceNumInput').value;
-  closeInvoiceModal();
-  if (!filterClient) return;
-
-  const invoiceKey = `${filterClient}-${filterMonth || 'all'}`;
-  const invoiceNum = getOrAssignInvoiceNumber(invoiceKey, typedInvoiceNum);
-
-  const client = state.clients.find(c => c.id === filterClient);
-  const clientName = client ? client.name : 'Client';
-
-  let entries = state.entries.filter(e => e.clientId === filterClient);
-  if (filterMonth) entries = entries.filter(e => e.date.startsWith(filterMonth));
-  entries = [...entries].sort((a, b) => a.date.localeCompare(b.date));
-
-  let expenses = state.expenses.filter(e => e.clientId === filterClient);
-  if (filterMonth) expenses = expenses.filter(e => e.date.startsWith(filterMonth));
-  expenses = [...expenses].sort((a, b) => a.date.localeCompare(b.date));
-
-  const totalMin = entries.reduce((s, e) => s + e.minutes, 0);
-  const billing = calcClientBilling(client, entries, filterMonth || undefined);
-  const totalAmt = billing.amount;
-  const expensesTotal = expenses.reduce((s, e) => s + e.amount, 0);
-  const grandTotal = totalAmt + expensesTotal;
-
-  const monthLabel = filterMonth
-    ? new Date(filterMonth + '-02').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
-    : 'All Time';
+function renderGeneralInvoiceHtml(data, invoiceNum, isPreview) {
+  const { client, clientName, entries, expenses, totalMin, billing, totalAmt, expensesTotal, grandTotal, monthLabel } = data;
 
   const rows = entries.map(e => {
     const billedAsRetainer = isEntryUnderRetainer(client, e);
@@ -2207,36 +2191,10 @@ function confirmInvoice(explicitClientId, explicitMonth) {
       <td>${fmtMoney(e.amount)}</td>
     </tr>`).join('');
 
-  const win = window.open('', '_blank');
-  win.document.write(`<!DOCTYPE html><html><head><title>Invoice – ${clientName}</title>
-  <style>
-    body { font-family: 'Segoe UI', sans-serif; color: #111; padding: 40px; max-width: 800px; margin: 0 auto; }
-    .invoice-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 32px; border-bottom: 2px solid #111; padding-bottom: 20px; }
-    .invoice-header img { height: 70px; width: auto; }
-    .company { text-align: right; }
-    .company h2 { font-size: 1.3rem; margin: 0 0 4px; }
-    .company p { color: #555; font-size: 0.85rem; margin: 0; }
-    h1 { font-size: 1.4rem; margin: 0 0 4px; }
-    h2.section { font-size: 1.05rem; margin: 28px 0 10px; }
-    .meta { color: #555; font-size: 0.9rem; margin-bottom: 24px; }
-    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-    th { text-align: left; padding: 8px 10px; border-bottom: 2px solid #111; font-weight: 600; }
-    td { padding: 8px 10px; border-bottom: 1px solid #ddd; }
-    .total-row td { border-top: 2px solid #111; border-bottom: none; font-weight: 700; font-size: 1rem; }
-    .grand-total { text-align: right; margin-top: 24px; font-size: 1.2rem; font-weight: 800; }
-    @media print { body { padding: 20px; } }
-  </style></head><body>
-  <div class="invoice-header">
-    <img src="https://mtwall2026.github.io/consulting-tracker/logo.png" alt="Cirrobound Solutions" />
-    <div class="company">
-      <h2>Cirrobound Solutions</h2>
-      <p>Consulting Invoice</p>
-    </div>
-  </div>
-  <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:6px">
-    <h1 style="margin:0">Invoice — ${clientName}</h1>
-    <span style="font-size:1rem;font-weight:700;color:#333">${invoiceNum}</span>
-  </div>
+  return `<!DOCTYPE html><html><head><title>Invoice – ${clientName}</title>
+  <style>${INVOICE_STYLE}</style></head><body>
+  ${previewBannerHtml(isPreview)}
+  ${invoiceHeaderHtml(clientName, invoiceNum, 'Consulting Invoice')}
   <p class="meta">${monthLabel} &nbsp;·&nbsp; ${fmtDur(totalMin)} logged &nbsp;·&nbsp; ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</p>
   <table>
     <thead><tr><th>Date</th><th>Time</th><th>Event</th><th>Location</th><th>Description</th><th>Duration</th><th>Rate</th><th>Amount</th></tr></thead>
@@ -2255,9 +2213,108 @@ function confirmInvoice(explicitClientId, explicitMonth) {
     </tbody>
   </table>` : ''}
   <div class="grand-total">Grand Total: ${fmtMoney(grandTotal)}</div>
-  <script>window.onload = () => { window.print(); }<\/script>
-  </body></html>`);
+  ${autoPrintScript(isPreview)}
+  </body></html>`;
+}
+
+// ── Invoice presentation helpers (side-effecting, no state writes) ──
+function openInvoiceWindow(html) {
+  const win = window.open('', '_blank');
+  win.document.write(html);
   win.document.close();
+}
+function sendInvoiceMailto(subject, body) {
+  window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
+// Records a committed (non-preview) invoice for the History tab. `data` is
+// deep-copied via JSON round-trip — this is the snapshot that makes Reprint
+// faithful to what was actually sent, even if entries/client settings
+// change afterward. paid/paymentDocument start empty; set later from the
+// History tab once the client actually pays.
+function recordInvoiceHistory({ key, kind, clientId, clientName, month, invoiceNum, mode, data }) {
+  if (!state.invoiceHistory) state.invoiceHistory = [];
+  state.invoiceHistory.push({
+    id: uid(),
+    key, kind, clientId, clientName, month,
+    invoiceNum,
+    generatedAt: new Date().toISOString(),
+    mode,
+    snapshot: JSON.parse(JSON.stringify(data)),
+    voided: false,
+    voidedAt: null,
+    paid: false,
+    paidAt: null,
+    paymentNote: '',
+    paymentDocument: null   // { fileName, driveItemId, webUrl } once uploaded
+  });
+  save();
+  odAutoSave();
+}
+
+// ── Invoice Preview ─────────────────────────────────────
+// Shows the exact same content a real invoice would, but never assigns or
+// touches an invoice number and never records anything to history — purely
+// look-before-you-commit. This is what stops a "just checking" invoice from
+// ever silently consuming a real number or blocking a period from being
+// billed for real later (the exact problem that prompted this feature).
+function previewGeneralInvoice(explicitClientId, explicitMonth) {
+  const filterClient = explicitClientId || document.getElementById('invoiceClientPick').value;
+  const filterMonth = explicitMonth !== undefined ? explicitMonth : document.getElementById('invoiceMonthPick').value;
+  if (!filterClient) return;
+  const data = buildGeneralInvoiceData(filterClient, filterMonth);
+  openInvoiceWindow(renderGeneralInvoiceHtml(data, 'PREVIEW', true));
+}
+
+// month defaults to the current month when nothing's due yet — previewing
+// should work even when Generate is disabled (e.g. caught up, or too early).
+function previewFeeInvoice(clientId, month) {
+  const client = state.clients.find(c => c.id === clientId);
+  if (!client) return;
+  const data = buildFeeInvoiceData(clientId, month || new Date().toISOString().slice(0, 7));
+  if (!data) return;
+  openInvoiceWindow(renderFeeInvoiceHtml(data, 'PREVIEW', true));
+}
+
+function previewOverageInvoice(clientId, month) {
+  const client = state.clients.find(c => c.id === clientId);
+  if (!client) return;
+  const data = buildOverageInvoiceData(clientId, month || new Date().toISOString().slice(0, 7));
+  if (!data) return;
+  openInvoiceWindow(renderOverageInvoiceHtml(data, 'PREVIEW', true));
+}
+
+// ── Email Invoice ──────────────────────────────────────
+// explicitClientId/explicitMonth let the Retainers tab's "Generate Next
+// Invoice" reuse this exact same invoice logic instead of requiring the
+// client+month picker modal.
+function emailInvoice(explicitClientId, explicitMonth) {
+  const filterClient = explicitClientId || document.getElementById('invoiceClientPick').value;
+  const filterMonth   = explicitMonth !== undefined ? explicitMonth : document.getElementById('invoiceMonthPick').value;
+  // Only the modal-triggered call has a typed override to honor.
+  const typedInvoiceNum = explicitClientId ? null : document.getElementById('invoiceNumInput').value;
+  closeInvoiceModal();
+  if (!filterClient) return;
+
+  const invoiceKey = `${filterClient}-${filterMonth || 'all'}`;
+  const invoiceNum = getOrAssignInvoiceNumber(invoiceKey, typedInvoiceNum);
+  const data = buildGeneralInvoiceData(filterClient, filterMonth);
+  sendInvoiceMailto(`${invoiceNum} – ${data.clientName} – ${data.monthLabel}`, renderGeneralInvoiceText(data, invoiceNum));
+  recordInvoiceHistory({ key: invoiceKey, kind: 'general', clientId: filterClient, clientName: data.clientName, month: filterMonth || '', invoiceNum, mode: 'email', data });
+}
+
+function confirmInvoice(explicitClientId, explicitMonth) {
+  const filterClient = explicitClientId || document.getElementById('invoiceClientPick').value;
+  const filterMonth   = explicitMonth !== undefined ? explicitMonth : document.getElementById('invoiceMonthPick').value;
+  const typedInvoiceNum = explicitClientId ? null : document.getElementById('invoiceNumInput').value;
+  closeInvoiceModal();
+  if (!filterClient) return;
+
+  const invoiceKey = `${filterClient}-${filterMonth || 'all'}`;
+  const invoiceNum = getOrAssignInvoiceNumber(invoiceKey, typedInvoiceNum);
+  const data = buildGeneralInvoiceData(filterClient, filterMonth);
+  openInvoiceWindow(renderGeneralInvoiceHtml(data, invoiceNum, false));
+  recordInvoiceHistory({ key: invoiceKey, kind: 'general', clientId: filterClient, clientName: data.clientName, month: filterMonth || '', invoiceNum, mode: 'print', data });
 }
 
 // ── Retainers ────────────────────────────────────────────
@@ -2401,26 +2458,49 @@ function invoiceHeaderHtml(clientName, invoiceNum, subtitle) {
   </div>`;
 }
 
-function generateFeeInvoice(clientId, month, mode, invoiceNumOverride) {
+// A preview must be unmistakable from a real invoice: a sticky banner (with
+// its own Print button, since previews skip auto-print below) instead of
+// the invoice number, so it can never be confused for something sent.
+function previewBannerHtml(isPreview) {
+  if (!isPreview) return '';
+  return `
+  <div style="position:sticky;top:0;background:#b8860b;color:#fff;text-align:center;padding:8px;font-weight:700;letter-spacing:.05em;font-family:'Segoe UI',sans-serif;display:flex;align-items:center;justify-content:center;gap:16px;margin:-40px -40px 20px -40px">
+    <span>PREVIEW — NOT SENT, NO INVOICE # ASSIGNED</span>
+    <button onclick="window.print()" style="background:#fff;color:#b8860b;border:none;border-radius:4px;padding:4px 12px;font-weight:700;cursor:pointer">Print</button>
+  </div>`;
+}
+// Real invoices auto-open the print dialog on load; previews never should
+// (the user is just looking, not sending) — the banner's own button covers
+// anyone who wants to print/save a preview anyway.
+function autoPrintScript(isPreview) {
+  return isPreview ? '' : `<script>window.onload = () => { window.print(); }<\/script>`;
+}
+
+function buildFeeInvoiceData(clientId, month) {
   const client = state.clients.find(c => c.id === clientId);
-  if (!client) return;
-  const invoiceNum = getOrAssignInvoiceNumber(`${clientId}-${month}-fee`, invoiceNumOverride);
+  if (!client) return null;
   const monthLabel = new Date(month + '-02').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-  const dateGenerated = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
   const fee = client.retainerAmount || 0;
   const planNote = `Includes ${client.retainerHours || 0}h/mo, overage billed at ${fmtMoney(client.overageRate || client.rate)}/hr`;
+  return { client, fee, monthLabel, planNote };
+}
 
-  if (mode === 'email') {
-    const body = [
-      'CONSULTING INVOICE — RETAINER FEE', '==================================', '',
-      `Invoice #:   ${invoiceNum}`, `Client:      ${client.name}`, `Period:      ${monthLabel}`, `Generated:   ${dateGenerated}`, '',
-      `RETAINER FEE: ${fmtMoney(fee)}`, `  ${planNote}`, '',
-      `GRAND TOTAL:  ${fmtMoney(fee)}`, '', '--', 'Cirrobound Solutions',
-    ].join('\n');
-    window.location.href = `mailto:?subject=${encodeURIComponent(`${invoiceNum} – ${client.name} – ${monthLabel} Retainer Fee`)}&body=${encodeURIComponent(body)}`;
-  } else {
-    const win = window.open('', '_blank');
-    win.document.write(`<!DOCTYPE html><html><head><title>Invoice – ${client.name}</title><style>${INVOICE_STYLE}</style></head><body>
+function renderFeeInvoiceText(data, invoiceNum) {
+  const { client, fee, monthLabel, planNote } = data;
+  const dateGenerated = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  return [
+    'CONSULTING INVOICE — RETAINER FEE', '==================================', '',
+    `Invoice #:   ${invoiceNum}`, `Client:      ${client.name}`, `Period:      ${monthLabel}`, `Generated:   ${dateGenerated}`, '',
+    `RETAINER FEE: ${fmtMoney(fee)}`, `  ${planNote}`, '',
+    `GRAND TOTAL:  ${fmtMoney(fee)}`, '', '--', 'Cirrobound Solutions',
+  ].join('\n');
+}
+
+function renderFeeInvoiceHtml(data, invoiceNum, isPreview) {
+  const { client, fee, monthLabel, planNote } = data;
+  const dateGenerated = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  return `<!DOCTYPE html><html><head><title>Invoice – ${client.name}</title><style>${INVOICE_STYLE}</style></head><body>
+    ${previewBannerHtml(isPreview)}
     ${invoiceHeaderHtml(client.name, invoiceNum, 'Consulting Invoice — Retainer Fee')}
     <p class="meta">${monthLabel} &nbsp;·&nbsp; ${dateGenerated}</p>
     <div class="fee-box">
@@ -2428,16 +2508,27 @@ function generateFeeInvoice(clientId, month, mode, invoiceNumOverride) {
       <div class="note">Monthly Retainer Fee — ${planNote}</div>
     </div>
     <div class="grand-total">Grand Total: ${fmtMoney(fee)}</div>
-    <script>window.onload = () => { window.print(); }<\/script>
-    </body></html>`);
-    win.document.close();
+    ${autoPrintScript(isPreview)}
+    </body></html>`;
+}
+
+function generateFeeInvoice(clientId, month, mode, invoiceNumOverride) {
+  const data = buildFeeInvoiceData(clientId, month);
+  if (!data) return;
+  const key = `${clientId}-${month}-fee`;
+  const invoiceNum = getOrAssignInvoiceNumber(key, invoiceNumOverride);
+  if (mode === 'email') {
+    sendInvoiceMailto(`${invoiceNum} – ${data.client.name} – ${data.monthLabel} Retainer Fee`, renderFeeInvoiceText(data, invoiceNum));
+  } else {
+    openInvoiceWindow(renderFeeInvoiceHtml(data, invoiceNum, false));
   }
+  recordInvoiceHistory({ key, kind: 'fee', clientId, clientName: data.client.name, month, invoiceNum, mode, data });
   renderRetainersList();
 }
 
-function generateOverageInvoice(clientId, month, mode, invoiceNumOverride) {
+function buildOverageInvoiceData(clientId, month) {
   const client = state.clients.find(c => c.id === clientId);
-  if (!client) return;
+  if (!client) return null;
   let entries = state.entries.filter(e => e.clientId === clientId && e.date.startsWith(month) && isEntryUnderRetainer(client, e));
   entries = [...entries].sort((a, b) => a.date.localeCompare(b.date));
   let expenses = state.expenses.filter(e => e.clientId === clientId && e.date.startsWith(month));
@@ -2450,42 +2541,47 @@ function generateOverageInvoice(clientId, month, mode, invoiceNumOverride) {
   const overageAmount = overageHours * overageRate;
   const expensesTotal = expenses.reduce((s, e) => s + e.amount, 0);
   const grandTotal = overageAmount + expensesTotal;
-
-  const invoiceNum = getOrAssignInvoiceNumber(`${clientId}-${month}-overage`, invoiceNumOverride);
   const monthLabel = new Date(month + '-02').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-  const dateGenerated = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
 
-  if (mode === 'email') {
-    const COL_W = [12, 8, 18, 12, 20, 8];
-    const padR = (s, w) => String(s).slice(0, w).padEnd(w);
-    const headerRow = [padR('Date', COL_W[0]), padR('Time', COL_W[1]), padR('Event', COL_W[2]), padR('Location', COL_W[3]), padR('Description', COL_W[4]), padR('Duration', COL_W[5])].join('  ');
-    const divider = '-'.repeat(headerRow.length);
-    const entryRows = entries.map(e => [padR(fmtDate(e.date), COL_W[0]), padR(e.time || '—', COL_W[1]), padR(e.note || '—', COL_W[2]), padR(e.location || '—', COL_W[3]), padR(e.noteText || '—', COL_W[4]), padR(fmtDur(e.minutes), COL_W[5])].join('  ')).join('\n');
-    const expenseLines = expenses.length ? [
-      '', 'EXPENSES',
-      ...expenses.map(e => `  ${fmtDate(e.date)}  ${e.category}  ${e.description || '—'}  ${fmtMoney(e.amount)}`),
-      `EXPENSES SUBTOTAL: ${fmtMoney(expensesTotal)}`,
-    ].join('\n') : '';
-    const body = [
-      'CONSULTING INVOICE — RETAINER OVERAGE', '======================================', '',
-      `Invoice #:   ${invoiceNum}`, `Client:      ${client.name}`, `Period:      ${monthLabel}`, `Generated:   ${dateGenerated}`, '',
-      divider, headerRow, divider, entryRows, divider, '',
-      `TOTAL HOURS:      ${hours.toFixed(2)}h (${includedHours}h included)`,
-      `OVERAGE:          ${overageHours.toFixed(2)}h @ ${fmtMoney(overageRate)}/hr = ${fmtMoney(overageAmount)}`,
-      expenseLines, '',
-      `GRAND TOTAL:      ${fmtMoney(grandTotal)}`, '', '--', 'Cirrobound Solutions',
-    ].join('\n');
-    window.location.href = `mailto:?subject=${encodeURIComponent(`${invoiceNum} – ${client.name} – ${monthLabel} Overage`)}&body=${encodeURIComponent(body)}`;
-  } else {
-    const rows = entries.map(e => `
+  return { client, entries, expenses, hours, includedHours, overageRate, overageHours, overageAmount, expensesTotal, grandTotal, monthLabel };
+}
+
+function renderOverageInvoiceText(data, invoiceNum) {
+  const { client, entries, expenses, hours, includedHours, overageRate, overageHours, overageAmount, expensesTotal, grandTotal, monthLabel } = data;
+  const dateGenerated = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  const COL_W = [12, 8, 18, 12, 20, 8];
+  const padR = (s, w) => String(s).slice(0, w).padEnd(w);
+  const headerRow = [padR('Date', COL_W[0]), padR('Time', COL_W[1]), padR('Event', COL_W[2]), padR('Location', COL_W[3]), padR('Description', COL_W[4]), padR('Duration', COL_W[5])].join('  ');
+  const divider = '-'.repeat(headerRow.length);
+  const entryRows = entries.map(e => [padR(fmtDate(e.date), COL_W[0]), padR(e.time || '—', COL_W[1]), padR(e.note || '—', COL_W[2]), padR(e.location || '—', COL_W[3]), padR(e.noteText || '—', COL_W[4]), padR(fmtDur(e.minutes), COL_W[5])].join('  ')).join('\n');
+  const expenseLines = expenses.length ? [
+    '', 'EXPENSES',
+    ...expenses.map(e => `  ${fmtDate(e.date)}  ${e.category}  ${e.description || '—'}  ${fmtMoney(e.amount)}`),
+    `EXPENSES SUBTOTAL: ${fmtMoney(expensesTotal)}`,
+  ].join('\n') : '';
+  return [
+    'CONSULTING INVOICE — RETAINER OVERAGE', '======================================', '',
+    `Invoice #:   ${invoiceNum}`, `Client:      ${client.name}`, `Period:      ${monthLabel}`, `Generated:   ${dateGenerated}`, '',
+    divider, headerRow, divider, entryRows, divider, '',
+    `TOTAL HOURS:      ${hours.toFixed(2)}h (${includedHours}h included)`,
+    `OVERAGE:          ${overageHours.toFixed(2)}h @ ${fmtMoney(overageRate)}/hr = ${fmtMoney(overageAmount)}`,
+    expenseLines, '',
+    `GRAND TOTAL:      ${fmtMoney(grandTotal)}`, '', '--', 'Cirrobound Solutions',
+  ].join('\n');
+}
+
+function renderOverageInvoiceHtml(data, invoiceNum, isPreview) {
+  const { client, entries, expenses, hours, includedHours, overageRate, overageHours, overageAmount, expensesTotal, grandTotal, monthLabel } = data;
+  const dateGenerated = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  const rows = entries.map(e => `
       <tr>
         <td>${fmtDate(e.date)}</td><td>${e.time || '—'}</td><td>${e.note || '—'}</td>
         <td>${e.location || '—'}</td><td>${e.noteText || '—'}</td><td>${fmtDur(e.minutes)}</td>
       </tr>`).join('');
-    const expenseRows = expenses.map(e => `
+  const expenseRows = expenses.map(e => `
       <tr><td>${fmtDate(e.date)}</td><td>${e.category}</td><td>${e.description || '—'}</td><td>${fmtMoney(e.amount)}</td></tr>`).join('');
-    const win = window.open('', '_blank');
-    win.document.write(`<!DOCTYPE html><html><head><title>Invoice – ${client.name}</title><style>${INVOICE_STYLE}</style></head><body>
+  return `<!DOCTYPE html><html><head><title>Invoice – ${client.name}</title><style>${INVOICE_STYLE}</style></head><body>
+    ${previewBannerHtml(isPreview)}
     ${invoiceHeaderHtml(client.name, invoiceNum, 'Consulting Invoice — Retainer Overage')}
     <p class="meta">${monthLabel} &nbsp;·&nbsp; ${hours.toFixed(1)}h logged (${includedHours}h included) &nbsp;·&nbsp; ${dateGenerated}</p>
     <table>
@@ -2506,10 +2602,21 @@ function generateOverageInvoice(clientId, month, mode, invoiceNumOverride) {
       </tbody>
     </table>` : ''}
     <div class="grand-total">Grand Total: ${fmtMoney(grandTotal)}</div>
-    <script>window.onload = () => { window.print(); }<\/script>
-    </body></html>`);
-    win.document.close();
+    ${autoPrintScript(isPreview)}
+    </body></html>`;
+}
+
+function generateOverageInvoice(clientId, month, mode, invoiceNumOverride) {
+  const data = buildOverageInvoiceData(clientId, month);
+  if (!data) return;
+  const key = `${clientId}-${month}-overage`;
+  const invoiceNum = getOrAssignInvoiceNumber(key, invoiceNumOverride);
+  if (mode === 'email') {
+    sendInvoiceMailto(`${invoiceNum} – ${data.client.name} – ${data.monthLabel} Overage`, renderOverageInvoiceText(data, invoiceNum));
+  } else {
+    openInvoiceWindow(renderOverageInvoiceHtml(data, invoiceNum, false));
   }
+  recordInvoiceHistory({ key, kind: 'overage', clientId, clientName: data.client.name, month, invoiceNum, mode, data });
   renderRetainersList();
 }
 
@@ -2577,6 +2684,7 @@ function renderRetainersList() {
             <td>
               <div style="margin-bottom:6px">${feeMonth ? monthLabel(feeMonth) : '<span style="color:var(--muted)">Caught up</span>'}</div>
               <div style="display:flex;gap:6px">
+                <button class="btn btn-ghost btn-sm" onclick="previewFeeInvoice('${c.id}', '${feeMonth || currentMonth}')" style="color:var(--muted)">Preview</button>
                 <button class="btn btn-primary btn-sm" onclick="generateFeeInvoiceForClient('${c.id}', 'print')" ${feeMonth ? '' : 'disabled'}>Generate</button>
                 <button class="btn btn-ghost btn-sm" onclick="generateFeeInvoiceForClient('${c.id}', 'email')" ${feeMonth ? '' : 'disabled'}>Email</button>
               </div>
@@ -2584,6 +2692,7 @@ function renderRetainersList() {
             <td>
               <div style="margin-bottom:6px">${overageMonth ? monthLabel(overageMonth) : '<span style="color:var(--muted)">None due</span>'}</div>
               <div style="display:flex;gap:6px">
+                <button class="btn btn-ghost btn-sm" onclick="previewOverageInvoice('${c.id}', '${overageMonth || currentMonth}')" style="color:var(--muted)">Preview</button>
                 <button class="btn btn-primary btn-sm" onclick="generateOverageInvoiceForClient('${c.id}', 'print')" ${overageMonth ? '' : 'disabled'}>Generate</button>
                 <button class="btn btn-ghost btn-sm" onclick="generateOverageInvoiceForClient('${c.id}', 'email')" ${overageMonth ? '' : 'disabled'}>Email</button>
               </div>
@@ -2592,6 +2701,175 @@ function renderRetainersList() {
         }).join('')}
       </tbody>
     </table>`;
+}
+
+// ── Invoice History ──────────────────────────────────────
+function renderInvoiceHistory() {
+  const body = document.getElementById('invoiceHistoryBody');
+  if (!body) return;
+
+  const filterEl = document.getElementById('filterInvoiceHistoryClient');
+  const filterPrev = filterEl.value;
+  filterEl.innerHTML = '<option value="">All clients</option>';
+  state.clients.forEach(c => {
+    const o = document.createElement('option'); o.value = c.id; o.textContent = c.name; filterEl.appendChild(o);
+  });
+  if (filterPrev) filterEl.value = filterPrev;
+
+  const filterClient = filterEl.value;
+  let records = state.invoiceHistory || [];
+  if (filterClient) records = records.filter(r => r.clientId === filterClient);
+  records = [...records].sort((a, b) => b.generatedAt.localeCompare(a.generatedAt));
+
+  if (!records.length) { body.innerHTML = '<p class="empty">No invoices generated yet.</p>'; return; }
+
+  const kindLabel = { general: 'General', fee: 'Fee', overage: 'Overage' };
+
+  body.innerHTML = `
+    <table>
+      <thead><tr>
+        <th>Client</th><th>Kind</th><th>Period</th><th>Invoice #</th><th>Generated</th><th>Status</th><th></th>
+      </tr></thead>
+      <tbody>
+        ${records.map(r => {
+          const periodLabel = r.month ? new Date(r.month + '-02').toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : 'All Time';
+          const generatedLabel = new Date(r.generatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+          if (r.voided) {
+            return `
+            <tr style="opacity:0.5">
+              <td>${r.clientName}</td>
+              <td>${kindLabel[r.kind] || r.kind}</td>
+              <td>${periodLabel}</td>
+              <td>${r.invoiceNum}</td>
+              <td>${generatedLabel}</td>
+              <td><span class="badge" style="background:#3a1e1e;color:var(--danger)">VOIDED</span></td>
+              <td></td>
+            </tr>`;
+          }
+          const paidLabel = r.paid
+            ? `Paid${r.paidAt ? ' ' + fmtDate(r.paidAt.slice(0, 10)) : ''}`
+            : 'Unpaid';
+          return `
+          <tr>
+            <td><span class="badge">${r.clientName}</span></td>
+            <td>${kindLabel[r.kind] || r.kind}</td>
+            <td>${periodLabel}</td>
+            <td>${r.invoiceNum}</td>
+            <td>${generatedLabel}</td>
+            <td>
+              <span style="color:${r.paid ? 'var(--accent2)' : 'var(--muted)'}">${paidLabel}</span>
+              <button class="del-row" onclick="togglePaid('${r.id}')" title="${r.paid ? 'Mark Unpaid' : 'Mark Paid'}">${r.paid ? '&#8635;' : '&#10003;'}</button>
+            </td>
+            <td style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+              <button class="del-row" onclick="reprintInvoice('${r.id}', 'print')" title="Reprint" style="color:var(--accent)">&#128424;</button>
+              <button class="del-row" onclick="reprintInvoice('${r.id}', 'email')" title="Reprint via Email" style="color:var(--accent2)">&#9993;</button>
+              ${r.paymentDocument
+                ? `<a href="${r.paymentDocument.webUrl}" target="_blank" title="View payment document: ${r.paymentDocument.fileName}" style="color:var(--accent2)">&#128196;</a>`
+                : `<input type="file" id="payDoc-${r.id}" style="display:none" onchange="uploadPaymentDocument('${r.id}', this.files[0])" />
+                   <button class="del-row" onclick="document.getElementById('payDoc-${r.id}').click()" title="Upload payment document">&#128228;</button>`
+              }
+              <button class="del-row" onclick="voidInvoiceHistory('${r.id}')" title="Void">Void</button>
+            </td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`;
+}
+
+// Renders straight from the frozen snapshot captured at the time this
+// invoice was originally committed, using its original invoice number —
+// never touches state.invoiceNumbers or state.invoiceHistory, so reprinting
+// something never creates a duplicate number or a second history entry.
+// Faithful to what was actually sent even if entries/client settings have
+// since changed (that's the whole point of storing a snapshot).
+function reprintInvoice(historyId, mode) {
+  const rec = (state.invoiceHistory || []).find(h => h.id === historyId);
+  if (!rec || rec.voided) return;
+
+  const periodLabel = rec.month || 'Reprint';
+  if (mode === 'email') {
+    const text = rec.kind === 'general' ? renderGeneralInvoiceText(rec.snapshot, rec.invoiceNum)
+               : rec.kind === 'fee'     ? renderFeeInvoiceText(rec.snapshot, rec.invoiceNum)
+               :                          renderOverageInvoiceText(rec.snapshot, rec.invoiceNum);
+    sendInvoiceMailto(`${rec.invoiceNum} – ${rec.clientName} – ${periodLabel} (Reprint)`, text);
+  } else {
+    const html = rec.kind === 'general' ? renderGeneralInvoiceHtml(rec.snapshot, rec.invoiceNum, false)
+               : rec.kind === 'fee'     ? renderFeeInvoiceHtml(rec.snapshot, rec.invoiceNum, false)
+               :                          renderOverageInvoiceHtml(rec.snapshot, rec.invoiceNum, false);
+    openInvoiceWindow(html);
+  }
+}
+
+// Frees a mistakenly/test-generated invoice's period back up so the real
+// one can be generated. Deliberately does NOT touch state.nextInvoiceNum —
+// the voided number becomes a permanent gap (never reused), which is
+// standard practice and guarantees two different documents can never end
+// up sharing one number. The history record is marked voided, not deleted,
+// so it stays as the audit trail explaining the gap.
+function voidInvoiceHistory(historyId) {
+  const rec = (state.invoiceHistory || []).find(h => h.id === historyId);
+  if (!rec || rec.voided) return;
+  const label = `${rec.invoiceNum} (${rec.clientName}${rec.month ? ' – ' + rec.month : ' – All Time'})`;
+  if (!confirm(
+    `Void invoice ${label}?\n\n` +
+    `This frees up ${rec.month || 'this period'} to be invoiced again and removes it from the ` +
+    `"already billed" check — use this ONLY for a mistaken/test invoice, never one that was actually ` +
+    `sent to the client. This cannot be undone.`
+  )) return;
+
+  if (state.invoiceNumbers) delete state.invoiceNumbers[rec.key];
+  rec.voided = true;
+  rec.voidedAt = new Date().toISOString();
+
+  save();
+  odAutoSave();
+  render();
+  alert(`${label} voided. That period is now available to invoice again.`);
+}
+
+function togglePaid(historyId) {
+  const rec = (state.invoiceHistory || []).find(h => h.id === historyId);
+  if (!rec) return;
+  rec.paid = !rec.paid;
+  rec.paidAt = rec.paid ? new Date().toISOString() : null;
+  save();
+  odAutoSave();
+  render();
+}
+
+// Uploads the payment document as its own file into a Payments folder in
+// the signed-in account's OneDrive, then stores just a small reference
+// (name + Graph item id + view link) on the invoice history record — never
+// the file's bytes inside app state. Keeps state small regardless of how
+// many receipts pile up, unlike embedding files directly would. Graph's
+// simple-upload endpoint used here tops out at 4MB, which comfortably
+// covers a scanned receipt or payment screenshot.
+async function uploadPaymentDocument(historyId, file) {
+  if (!file) return;
+  if (!odAccount) { alert('Please sign in first.'); return; }
+  const rec = (state.invoiceHistory || []).find(h => h.id === historyId);
+  if (!rec) return;
+
+  const safeInvoiceNum = rec.invoiceNum.replace(/[^A-Za-z0-9-]/g, '_');
+  const fileName = `${safeInvoiceNum}-${file.name}`;
+
+  try {
+    const token = await getOdToken();
+    const res = await fetch(
+      'https://graph.microsoft.com/v1.0/me/drive/root:/Apps/Consulting Tracker/Payments/' + fileName + ':/content',
+      { method: 'PUT', headers: { Authorization: 'Bearer ' + token, 'Content-Type': file.type || 'application/octet-stream' }, body: file }
+    );
+    if (!res.ok) throw new Error(await res.text());
+    const item = await res.json();
+    rec.paymentDocument = { fileName: file.name, driveItemId: item.id, webUrl: item.webUrl };
+    if (!rec.paid) { rec.paid = true; rec.paidAt = new Date().toISOString(); }
+    save();
+    odAutoSave();
+    render();
+    alert(`Payment document uploaded and linked to ${rec.invoiceNum}.`);
+  } catch(e) {
+    alert('Upload failed: ' + e.message);
+  }
 }
 
 // ── OneDrive Sync ──────────────────────────────────────
