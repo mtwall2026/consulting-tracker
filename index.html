@@ -2888,8 +2888,16 @@ function invoiceKindLabel(r) {
     const overageHours = r.snapshot && r.snapshot.overageHours;
     return overageHours > 0 ? 'Hours Over' : 'Retainer';
   }
-  const billingType = r.snapshot && r.snapshot.client && r.snapshot.client.billingType;
-  return billingType === 'retainer' ? 'Retainer' : 'Hourly';
+  // Checking the client's billing type alone isn't enough: a client who is
+  // a retainer client TODAY may have been plain hourly when this specific
+  // invoice's period was billed (e.g. any month before retainerStartDate,
+  // or any invoice generated before they converted at all — including
+  // backfilled invoices, which are always built from the CURRENT client
+  // record). billing.months is the actual count of months this invoice
+  // charged a retainer fee for — 0 means every dollar on it was billed
+  // hourly, regardless of what the client is classified as now.
+  const billing = r.snapshot && r.snapshot.billing;
+  return billing && billing.isRetainer && billing.months > 0 ? 'Retainer' : 'Hourly';
 }
 
 function renderInvoiceHistory() {
