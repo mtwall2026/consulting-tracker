@@ -646,6 +646,7 @@ let calMonth = new Date().getMonth(); // 0-based
 let currentView = 'timeTracking';
 function switchView(view) {
   currentView = view;
+  localStorage.setItem('ct_lastView', view);
   document.getElementById('viewTimeTracking').style.display = view === 'timeTracking' ? '' : 'none';
   document.getElementById('viewExpenses').style.display = view === 'expenses' ? '' : 'none';
   document.getElementById('viewRetainers').style.display = view === 'retainers' ? '' : 'none';
@@ -832,6 +833,14 @@ function init() {
 
   restoreTimerState();
   render();
+
+  // Land back on whichever tab was open before the last refresh, rather
+  // than always defaulting to Time Tracking.
+  const savedView = localStorage.getItem('ct_lastView');
+  if (['timeTracking', 'expenses', 'retainers', 'invoiceHistory'].includes(savedView) && savedView !== currentView) {
+    switchView(savedView);
+  }
+
   odInit();
 }
 
