@@ -2036,6 +2036,26 @@ function resetInvoiceNumbers() {
   alert('Invoice numbers reset to INV-1001.');
 }
 
+// Finds the OTHER key (if any) already using invoice number `num`, for
+// duplicate detection. `state.invoiceNumbers` only ever holds currently-
+// active mappings — voidInvoiceHistory() deletes a key's entry the moment
+// it's voided — so any match here is a genuine live conflict, not a freed
+// number being reused.
+function findKeyForInvoiceNumber(num, excludeKey) {
+  if (!state.invoiceNumbers) return null;
+  return Object.keys(state.invoiceNumbers).find(k => k !== excludeKey && state.invoiceNumbers[k] === num) || null;
+}
+
+// Human-readable description of an invoice key, for conflict messages —
+// falls back to the raw key if no (non-voided) history record matches it.
+function describeInvoiceKey(key) {
+  const rec = (state.invoiceHistory || []).find(h => h.key === key && !h.voided);
+  if (!rec) return key;
+  const kindLabel = { general: 'General', fee: 'Fee', overage: 'Monthly Summary' };
+  const period = rec.month ? new Date(rec.month + '-02').toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : 'All Time';
+  return `${rec.clientName} – ${kindLabel[rec.kind] || rec.kind} – ${period}`;
+}
+
 // Assigns (or reuses) an invoice number for `key`. If `overrideNum` is a
 // non-empty string (e.g. typed into the modal's Invoice # field, or a
 // prompt on the Retainers tab), that exact value is used instead of the
@@ -2048,11 +2068,25 @@ function resetInvoiceNumbers() {
 // actually typed. An auto-suggested/reused number (no override — e.g.
 // re-opening an invoice already generated earlier) only ever moves the
 // counter forward, so simply reprinting an old invoice can't regress it.
+//
+// Returns null (and alerts) if a typed override collides with a number
+// already in use under a DIFFERENT key — every caller must check for this
+// and abort before doing anything else (opening a window, sending mail,
+// recording history), so a rejected number never has side effects.
 function getOrAssignInvoiceNumber(key, overrideNum) {
   if (!state.nextInvoiceNum) state.nextInvoiceNum = 1001;
   if (!state.invoiceNumbers) state.invoiceNumbers = {};
   const typed = overrideNum && overrideNum.trim();
   const finalNum = typed || state.invoiceNumbers[key] || `INV-${state.nextInvoiceNum}`;
+
+  if (typed) {
+    const conflictKey = findKeyForInvoiceNumber(finalNum, key);
+    if (conflictKey) {
+      alert(`${finalNum} is already used for another invoice (${describeInvoiceKey(conflictKey)}). Choose a different number.`);
+      return null;
+    }
+  }
+
   state.invoiceNumbers[key] = finalNum;
   const numericPart = parseInt(String(finalNum).replace(/[^0-9]/g, ''), 10);
   if (!isNaN(numericPart)) {
@@ -2403,6 +2437,7 @@ function emailInvoice(explicitClientId, explicitMonth) {
 
   const invoiceKey = `${filterClient}-${filterMonth || 'all'}`;
   const invoiceNum = getOrAssignInvoiceNumber(invoiceKey, typedInvoiceNum);
+  if (!invoiceNum) return; // conflict — getOrAssignInvoiceNumber already alerted
   const data = buildGeneralInvoiceData(filterClient, filterMonth);
   sendInvoiceMailto(`${invoiceNum} – ${data.clientName} – ${data.monthLabel}`, renderGeneralInvoiceText(data, invoiceNum));
   recordInvoiceHistory({ key: invoiceKey, kind: 'general', clientId: filterClient, clientName: data.clientName, month: filterMonth || '', invoiceNum, mode: 'email', data });
@@ -2417,6 +2452,7 @@ function confirmInvoice(explicitClientId, explicitMonth) {
 
   const invoiceKey = `${filterClient}-${filterMonth || 'all'}`;
   const invoiceNum = getOrAssignInvoiceNumber(invoiceKey, typedInvoiceNum);
+  if (!invoiceNum) return; // conflict — getOrAssignInvoiceNumber already alerted
   const data = buildGeneralInvoiceData(filterClient, filterMonth);
   openInvoiceWindow(renderGeneralInvoiceHtml(data, invoiceNum, false));
   recordInvoiceHistory({ key: invoiceKey, kind: 'general', clientId: filterClient, clientName: data.clientName, month: filterMonth || '', invoiceNum, mode: 'print', data });
@@ -2621,6 +2657,7 @@ function generateFeeInvoice(clientId, month, mode, invoiceNumOverride) {
   if (!data) return;
   const key = `${clientId}-${month}-fee`;
   const invoiceNum = getOrAssignInvoiceNumber(key, invoiceNumOverride);
+  if (!invoiceNum) return; // conflict — getOrAssignInvoiceNumber already alerted
   if (mode === 'email') {
     sendInvoiceMailto(`${invoiceNum} – ${data.client.name} – ${data.monthLabel} Retainer Fee`, renderFeeInvoiceText(data, invoiceNum));
   } else {
@@ -2724,6 +2761,7 @@ function generateOverageInvoice(clientId, month, mode, invoiceNumOverride) {
   const hasOverage = data.overageHours > 0;
   const key = `${clientId}-${month}-overage`;
   const invoiceNum = getOrAssignInvoiceNumber(key, invoiceNumOverride);
+  if (!invoiceNum) return; // conflict — getOrAssignInvoiceNumber already alerted
   if (mode === 'email') {
     sendInvoiceMailto(`${invoiceNum} – ${data.client.name} – ${data.monthLabel}${hasOverage ? ' Overage' : ' Summary'}`, renderOverageInvoiceText(data, invoiceNum));
   } else {
