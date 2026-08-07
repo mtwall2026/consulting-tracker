@@ -2947,7 +2947,7 @@ function renderInvoiceHistory() {
               <td>${r.invoiceNum}</td>
               <td>${generatedLabel}</td>
               <td><span class="badge" style="background:#3a1e1e;color:var(--danger)">VOIDED</span></td>
-              <td><button class="del-row" onclick="deleteInvoiceHistory('${r.id}')" title="Permanently delete and free up ${r.invoiceNum} for reuse" style="color:var(--danger)">Delete</button></td>
+              <td><button class="btn btn-ghost btn-sm" onclick="deleteInvoiceHistory('${r.id}')" title="Permanently delete and free up ${r.invoiceNum} for reuse" style="color:var(--danger);border-color:var(--danger)">Delete</button></td>
             </tr>`;
           }
           return `
@@ -2974,15 +2974,14 @@ function renderInvoiceHistory() {
               </div>
             </td>
             <td style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-              <button class="del-row" onclick="reprintInvoice('${r.id}', 'print')" title="Reprint" style="color:var(--accent)">&#128424;</button>
-              <button class="del-row" onclick="reprintInvoice('${r.id}', 'email')" title="Reprint via Email" style="color:var(--accent2)">&#9993;</button>
+              <button class="btn btn-ghost btn-sm" onclick="reprintInvoice('${r.id}', 'print')" title="Reprint this invoice" style="color:var(--accent)">Reprint</button>
               ${r.paymentDocument
-                ? `<a href="${r.paymentDocument.webUrl}" target="_blank" title="View payment document: ${r.paymentDocument.fileName}" style="color:var(--accent2)">&#128196;</a>`
+                ? `<a href="${r.paymentDocument.webUrl}" target="_blank" class="btn btn-ghost btn-sm" title="View payment document: ${r.paymentDocument.fileName}" style="color:var(--accent2);text-decoration:none">Receipt</a>`
                 : `<input type="file" id="payDoc-${r.id}" style="display:none" onchange="uploadPaymentDocument('${r.id}', this.files[0])" />
-                   <button class="del-row" onclick="document.getElementById('payDoc-${r.id}').click()" title="Upload payment document">&#128228;</button>`
+                   <button class="btn btn-ghost btn-sm" onclick="document.getElementById('payDoc-${r.id}').click()" title="Upload payment document">Add Receipt</button>`
               }
-              <button class="del-row" onclick="voidInvoiceHistory('${r.id}')" title="Void">Void</button>
-              <button class="del-row" onclick="deleteInvoiceHistory('${r.id}')" title="Permanently delete and free up ${r.invoiceNum} for reuse" style="color:var(--danger)">Delete</button>
+              <button class="btn btn-ghost btn-sm" onclick="voidInvoiceHistory('${r.id}')" title="Void this invoice">Void</button>
+              <button class="btn btn-ghost btn-sm" onclick="deleteInvoiceHistory('${r.id}')" title="Permanently delete and free up ${r.invoiceNum} for reuse" style="color:var(--danger);border-color:var(--danger)">Delete</button>
             </td>
           </tr>`;
         }).join('')}
