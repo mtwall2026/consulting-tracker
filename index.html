@@ -1965,9 +1965,14 @@ function resetInvoiceNumbers() {
 // non-empty string (e.g. typed into the modal's Invoice # field, or a
 // prompt on the Retainers tab), that exact value is used instead of the
 // auto-suggested one — for correcting ordering, matching an external
-// numbering scheme, etc. Either way, the running counter is bumped past
-// whatever number actually got used, so future auto-suggestions never
-// collide with a manually-assigned one, in order or not.
+// numbering scheme, etc.
+//
+// A manually typed number always becomes the new baseline: the very next
+// invoice picks up right after it, whether that's higher or lower than
+// wherever the counter was — so it always follows the last one you
+// actually typed. An auto-suggested/reused number (no override — e.g.
+// re-opening an invoice already generated earlier) only ever moves the
+// counter forward, so simply reprinting an old invoice can't regress it.
 function getOrAssignInvoiceNumber(key, overrideNum) {
   if (!state.nextInvoiceNum) state.nextInvoiceNum = 1001;
   if (!state.invoiceNumbers) state.invoiceNumbers = {};
@@ -1975,7 +1980,9 @@ function getOrAssignInvoiceNumber(key, overrideNum) {
   const finalNum = typed || state.invoiceNumbers[key] || `INV-${state.nextInvoiceNum}`;
   state.invoiceNumbers[key] = finalNum;
   const numericPart = parseInt(String(finalNum).replace(/[^0-9]/g, ''), 10);
-  if (!isNaN(numericPart) && numericPart >= state.nextInvoiceNum) state.nextInvoiceNum = numericPart + 1;
+  if (!isNaN(numericPart)) {
+    if (typed || numericPart >= state.nextInvoiceNum) state.nextInvoiceNum = numericPart + 1;
+  }
   save();
   return finalNum;
 }
