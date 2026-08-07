@@ -166,10 +166,31 @@
     .status-pill:hover { border-color: var(--accent2); color: var(--accent2); }
     .status-pill.active { background: rgba(46, 204, 113, .14); color: var(--accent2); border-color: var(--accent2); }
     .status-pill .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .8; }
-    .paid-date-row { display: flex; align-items: center; gap: 6px; padding-left: 2px; }
-    .paid-date-row input[type="date"] {
-      font-size: 0.72rem; padding: 2px 6px; background: var(--surface2);
-      color: var(--text); border: 1px solid var(--border); border-radius: 6px;
+    /* Modern date chip: a styled clickable pill showing the formatted date,
+       backed by a fully-hidden native <input type=date> opened via
+       showPicker() — avoids the browser's default unstyled date UI. */
+    .date-chip {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 9px 3px 8px; border-radius: 20px;
+      font-size: 0.72rem; font-weight: 500;
+      border: 1px dashed var(--border); background: transparent; color: var(--muted);
+      cursor: pointer; transition: background .12s, border-color .12s, color .12s;
+      width: fit-content; position: relative;
+    }
+    .date-chip:hover { border-color: var(--accent2); color: var(--accent2); }
+    .date-chip.set {
+      border-style: solid; background: var(--surface2); color: var(--text);
+    }
+    .date-chip svg { width: 12px; height: 12px; flex-shrink: 0; opacity: .75; }
+    .date-chip .clear-date {
+      margin-left: 2px; color: var(--muted); font-size: 0.85rem; line-height: 1;
+      padding: 0 2px; border-radius: 50%; position: relative; z-index: 2;
+    }
+    .date-chip .clear-date:hover { color: var(--danger); }
+    .date-chip input[type="date"] {
+      position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1;
+      opacity: 0; border: none; padding: 0; margin: 0; cursor: pointer;
+      color-scheme: dark;
     }
 
     /* ── Summary ── */
@@ -2779,6 +2800,28 @@ function renderRetainersList() {
 }
 
 // ── Invoice History ──────────────────────────────────────
+
+// Renders a modern date chip: shows the formatted date (or "Set date"),
+// backed by a fully-transparent native <input type=date> covering the
+// whole chip so a click opens the real OS/browser date picker — but none
+// of the native input's ugly default chrome is ever visible. `setterFn`
+// is the name of the global function to call with (historyId, value) on
+// change (e.g. 'setPaidDate'). An "x" appears once a date is set, calling
+// the same setter with an empty string to clear it.
+function dateChipHtml(historyId, isoDate, setterFn, label) {
+  const dateVal = isoDate ? isoDate.slice(0, 10) : '';
+  const displayText = dateVal
+    ? new Date(dateVal + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    : 'Set date';
+  return `
+    <span class="date-chip ${dateVal ? 'set' : ''}" title="${label}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>
+      ${displayText}
+      ${dateVal ? `<span class="clear-date" onclick="event.stopPropagation();${setterFn}('${historyId}','')">&times;</span>` : ''}
+      <input type="date" value="${dateVal}" onchange="${setterFn}('${historyId}', this.value)" onclick="event.stopPropagation()" />
+    </span>`;
+}
+
 function renderInvoiceHistory() {
   const body = document.getElementById('invoiceHistoryBody');
   if (!body) return;
@@ -2823,7 +2866,6 @@ function renderInvoiceHistory() {
               <td></td>
             </tr>`;
           }
-          const paidDateVal = r.paidAt ? r.paidAt.slice(0, 10) : '';
           return `
           <tr>
             <td><span class="badge">${r.clientName}</span></td>
@@ -2833,15 +2875,17 @@ function renderInvoiceHistory() {
             <td>${generatedLabel}</td>
             <td>
               <div class="status-col">
-                <button class="status-pill ${r.sent ? 'active' : ''}" onclick="toggleSent('${r.id}')" title="Click to toggle">
-                  <span class="dot"></span>${r.sent ? 'Sent' : 'Not sent'}
-                </button>
-                <button class="status-pill ${r.paid ? 'active' : ''}" onclick="togglePaid('${r.id}')" title="Click to toggle">
-                  <span class="dot"></span>${r.paid ? 'Paid' : 'Unpaid'}
-                </button>
-                <div class="paid-date-row">
-                  <span style="font-size:0.7rem;color:var(--muted)">Paid on</span>
-                  <input type="date" value="${paidDateVal}" onchange="setPaidDate('${r.id}', this.value)" title="Set/edit the date payment was received" />
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                  <button class="status-pill ${r.sent ? 'active' : ''}" onclick="toggleSent('${r.id}')" title="Click to toggle">
+                    <span class="dot"></span>${r.sent ? 'Sent' : 'Not sent'}
+                  </button>
+                  ${dateChipHtml(r.id, r.sentAt, 'setSentDate', 'Sent date')}
+                </div>
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                  <button class="status-pill ${r.paid ? 'active' : ''}" onclick="togglePaid('${r.id}')" title="Click to toggle">
+                    <span class="dot"></span>${r.paid ? 'Paid' : 'Unpaid'}
+                  </button>
+                  ${dateChipHtml(r.id, r.paidAt, 'setPaidDate', 'Paid date')}
                 </div>
               </div>
             </td>
@@ -2945,6 +2989,21 @@ function setPaidDate(historyId, dateStr) {
     const prevTime = rec.paidAt ? rec.paidAt.slice(10) : 'T12:00:00.000Z';
     rec.paidAt = dateStr + prevTime;
     rec.paid = true;
+  }
+  save();
+  odAutoSave();
+  render();
+}
+
+// Mirrors setPaidDate() for the Sent date chip.
+function setSentDate(historyId, dateStr) {
+  const rec = (state.invoiceHistory || []).find(h => h.id === historyId);
+  if (!rec) return;
+  if (!dateStr) { rec.sentAt = null; rec.sent = false; }
+  else {
+    const prevTime = rec.sentAt ? rec.sentAt.slice(10) : 'T12:00:00.000Z';
+    rec.sentAt = dateStr + prevTime;
+    rec.sent = true;
   }
   save();
   odAutoSave();
