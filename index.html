@@ -797,6 +797,7 @@ function init() {
 
 function render() {
   applyTeamViewVisibility();
+  backfillInvoiceHistory();
   renderClients();
   renderMonthFilter();
   renderLog();
@@ -2252,6 +2253,57 @@ function recordInvoiceHistory({ key, kind, clientId, clientName, month, invoiceN
   odAutoSave();
 }
 
+// Invoices generated before the History tab existed have a number in
+// state.invoiceNumbers but no history record. Reconstructs a best-effort
+// record for each one (from CURRENT client/entry data, since no snapshot
+// was ever captured at the time) so every invoice number ever issued shows
+// up in the tab. Idempotent — safe to call on every render(); skips any
+// key that already has a non-voided history record.
+function backfillInvoiceHistory() {
+  if (!state.invoiceNumbers) return;
+  if (!state.invoiceHistory) state.invoiceHistory = [];
+  let added = false;
+
+  Object.keys(state.invoiceNumbers).forEach(key => {
+    const invoiceNum = state.invoiceNumbers[key];
+    if (state.invoiceHistory.some(h => h.key === key && !h.voided)) return;
+
+    const client = state.clients.find(c => key === c.id || key.startsWith(c.id + '-'));
+    if (!client) return;
+    const remainder = key.slice(client.id.length + 1);
+
+    let kind, month, data;
+    if (remainder.endsWith('-fee')) {
+      kind = 'fee'; month = remainder.slice(0, -4);
+      data = buildFeeInvoiceData(client.id, month);
+    } else if (remainder.endsWith('-overage')) {
+      kind = 'overage'; month = remainder.slice(0, -8);
+      data = buildOverageInvoiceData(client.id, month);
+    } else {
+      kind = 'general'; month = remainder === 'all' ? '' : remainder;
+      data = buildGeneralInvoiceData(client.id, month);
+    }
+
+    state.invoiceHistory.push({
+      id: uid(),
+      key, kind, clientId: client.id, clientName: client.name, month,
+      invoiceNum,
+      generatedAt: '',   // unknown — predates history tracking
+      mode: 'backfill',
+      snapshot: JSON.parse(JSON.stringify(data)),
+      voided: false,
+      voidedAt: null,
+      paid: false,
+      paidAt: null,
+      paymentNote: '',
+      paymentDocument: null
+    });
+    added = true;
+  });
+
+  if (added) { save(); odAutoSave(); }
+}
+
 // ── Invoice Preview ─────────────────────────────────────
 // Shows the exact same content a real invoice would, but never assigns or
 // touches an invoice number and never records anything to history — purely
@@ -2719,7 +2771,7 @@ function renderInvoiceHistory() {
   const filterClient = filterEl.value;
   let records = state.invoiceHistory || [];
   if (filterClient) records = records.filter(r => r.clientId === filterClient);
-  records = [...records].sort((a, b) => b.generatedAt.localeCompare(a.generatedAt));
+  records = [...records].sort((a, b) => (b.generatedAt || '').localeCompare(a.generatedAt || '') || b.invoiceNum.localeCompare(a.invoiceNum));
 
   if (!records.length) { body.innerHTML = '<p class="empty">No invoices generated yet.</p>'; return; }
 
@@ -2733,7 +2785,9 @@ function renderInvoiceHistory() {
       <tbody>
         ${records.map(r => {
           const periodLabel = r.month ? new Date(r.month + '-02').toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : 'All Time';
-          const generatedLabel = new Date(r.generatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+          const generatedLabel = r.generatedAt
+            ? new Date(r.generatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+            : '<span style="color:var(--muted)">Backfilled</span>';
           if (r.voided) {
             return `
             <tr style="opacity:0.5">
