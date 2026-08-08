@@ -2640,7 +2640,21 @@ const INVOICE_STYLE = `
     .bill-to-row .right { text-align: right; }
     .engagement-box { border-left: 3px solid #111; padding: 2px 22px; margin: 22px 0 26px; }
     .engagement-box p { margin: 0; line-height: 1.65; color: #333; font-size: 0.92rem; }
-    @media print { body { padding: 20px; } }`;
+    .preview-banner {
+      position: sticky; top: 0; background: #b8860b; color: #fff; text-align: center;
+      padding: 8px; font-weight: 700; letter-spacing: .05em;
+      display: flex; align-items: center; justify-content: center; gap: 16px;
+      margin: -40px -40px 20px -40px;
+    }
+    .preview-banner button { background: #fff; color: #b8860b; border: none; border-radius: 4px; padding: 4px 12px; font-weight: 700; cursor: pointer; }
+    @media print {
+      body { padding: 20px; }
+      /* The banner's negative margins are a screen-only trick to pull it
+         above the page padding — sticky positioning + negative margins
+         don't translate to the print layout and were clipping the top of
+         the page. Reset to a normal, non-sticky block when printing. */
+      .preview-banner { position: static; margin: 0 -20px 20px; }
+    }`;
 
 function invoiceHeaderHtml(clientName, invoiceNum, subtitle, docLabel) {
   return `
@@ -2663,9 +2677,9 @@ function invoiceHeaderHtml(clientName, invoiceNum, subtitle, docLabel) {
 function previewBannerHtml(isPreview) {
   if (!isPreview) return '';
   return `
-  <div style="position:sticky;top:0;background:#b8860b;color:#fff;text-align:center;padding:8px;font-weight:700;letter-spacing:.05em;font-family:'Segoe UI',sans-serif;display:flex;align-items:center;justify-content:center;gap:16px;margin:-40px -40px 20px -40px">
+  <div class="preview-banner">
     <span>PREVIEW — NOT SENT, NO INVOICE # ASSIGNED</span>
-    <button onclick="window.print()" style="background:#fff;color:#b8860b;border:none;border-radius:4px;padding:4px 12px;font-weight:700;cursor:pointer">Print</button>
+    <button onclick="window.print()">Print</button>
   </div>`;
 }
 // Real invoices auto-open the print dialog on load; previews never should
