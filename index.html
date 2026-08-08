@@ -2271,8 +2271,13 @@ function renderGeneralInvoiceHtml(data, invoiceNum, isPreview) {
   return `<!DOCTYPE html><html><head><title>Invoice – ${clientName}</title>
   <style>${INVOICE_STYLE}</style></head><body>
   ${previewBannerHtml(isPreview)}
-  ${invoiceHeaderHtml(clientName, invoiceNum, 'Consulting Invoice')}
-  <p class="meta">${monthLabel} &nbsp;·&nbsp; ${fmtDur(totalMin)} logged &nbsp;·&nbsp; ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</p>
+  ${invoiceHeaderHtml('Invoice')}
+  ${invoiceMetaRowHtml(clientName, [
+    { label: 'Invoice #', value: invoiceNum },
+    { label: 'Period', value: monthLabel },
+    { label: 'Hours Logged', value: fmtDur(totalMin) },
+    { label: 'Invoice Date', value: new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) },
+  ])}
   <table>
     <thead><tr><th>Date</th><th>Time</th><th>Event</th><th>Location</th><th>Description</th><th>Duration</th><th>Rate</th><th>Amount</th></tr></thead>
     <tbody>${rows}${hoursSubtotalRows}
@@ -2290,6 +2295,7 @@ function renderGeneralInvoiceHtml(data, invoiceNum, isPreview) {
     </tbody>
   </table>` : ''}
   <div class="grand-total">Grand Total: ${fmtMoney(grandTotal)}</div>
+  ${invoiceFooterHtml()}
   ${autoPrintScript(isPreview)}
   </body></html>`;
 }
@@ -2590,29 +2596,37 @@ function findNextUnbilledStatementMonth(client) {
 }
 
 const INVOICE_STYLE = `
-    body { font-family: 'Segoe UI', sans-serif; color: #111; padding: 40px; max-width: 800px; margin: 0 auto; }
-    .invoice-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 32px; border-bottom: 2px solid #111; padding-bottom: 20px; }
-    .invoice-header img { height: 70px; width: auto; }
+    :root { --brand: #1e78e0; --ink: #1a1a1a; --sub: #6b7280; --stripe: #f4f6f8; }
+    * { box-sizing: border-box; }
+    body { font-family: 'Segoe UI', sans-serif; color: var(--ink); padding: 40px; max-width: 800px; margin: 0 auto; }
+    .invoice-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 24px; }
+    .invoice-header img { height: 64px; width: auto; }
+    .doc-title { font-size: 2rem; font-weight: 300; color: var(--ink); text-align: right; letter-spacing: .04em; text-transform: uppercase; margin: 0 0 6px; }
     .company { text-align: right; }
-    .company h2 { font-size: 1.3rem; margin: 0 0 4px; }
-    .company p { color: #555; font-size: 0.85rem; margin: 0; }
+    .company h2 { font-size: 1rem; margin: 0 0 2px; font-weight: 700; }
+    .company p { color: var(--sub); font-size: 0.85rem; margin: 0; line-height: 1.5; }
     h1 { font-size: 1.4rem; margin: 0 0 4px; }
-    h2.section { font-size: 1.05rem; margin: 28px 0 10px; }
-    .meta { color: #555; font-size: 0.9rem; margin-bottom: 24px; }
+    h2.section { font-size: 0.95rem; margin: 28px 0 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink); font-weight: 700; padding-bottom: 6px; border-bottom: 1px solid #e2e5ea; }
+    .meta { color: var(--sub); font-size: 0.9rem; margin-bottom: 24px; }
+    .doc-divider { height: 1px; background: #ddd; margin: 0 0 28px; }
     table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-    th { text-align: left; padding: 8px 10px; border-bottom: 2px solid #111; font-weight: 600; }
-    td { padding: 8px 10px; border-bottom: 1px solid #ddd; }
-    .total-row td { border-top: 2px solid #111; border-bottom: none; font-weight: 700; font-size: 1rem; }
-    .fee-box { background: #f6f6f6; border-radius: 8px; padding: 20px 24px; margin-top: 20px; }
+    thead th { text-align: left; padding: 10px 12px; background: var(--brand); color: #fff; font-weight: 700; font-size: 0.8rem; }
+    td { padding: 10px 12px; border-bottom: 1px solid #eee; vertical-align: top; }
+    .total-row td { border-top: 2px solid var(--ink); border-bottom: none; font-weight: 700; font-size: 1rem; padding-top: 12px; }
+    .fee-box { background: var(--stripe); border-radius: 6px; padding: 20px 24px; margin-top: 20px; }
     .fee-box .amount { font-size: 1.6rem; font-weight: 800; }
-    .fee-box .note { color: #555; font-size: 0.85rem; margin-top: 6px; }
-    .grand-total { text-align: right; margin-top: 24px; font-size: 1.2rem; font-weight: 800; }
+    .fee-box .note { color: var(--sub); font-size: 0.85rem; margin-top: 6px; }
+    .grand-total { text-align: right; margin-top: 20px; font-size: 1.15rem; font-weight: 800; padding-top: 10px; border-top: 2px solid var(--ink); }
     .bill-to-row { display: flex; justify-content: space-between; margin-bottom: 24px; }
-    .field-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: .07em; color: #999; margin-bottom: 3px; font-weight: 700; }
+    .field-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: .07em; color: var(--sub); margin-bottom: 3px; font-weight: 700; }
     .bill-to-row .value { font-weight: 700; font-size: 1.05rem; }
     .bill-to-row .right { text-align: right; }
-    .engagement-box { border-left: 3px solid #111; padding: 2px 22px; margin: 22px 0 26px; }
+    .amount-due-box { background: var(--stripe); border-radius: 4px; padding: 8px 14px; margin-top: 8px; display: flex; justify-content: space-between; gap: 24px; font-weight: 700; }
+    .engagement-box { border-left: 3px solid var(--brand); background: var(--stripe); padding: 12px 20px; margin: 22px 0 26px; border-radius: 0 4px 4px 0; }
     .engagement-box p { margin: 0; line-height: 1.65; color: #333; font-size: 0.92rem; }
+    .doc-footer { margin-top: 36px; padding-top: 18px; border-top: 1px solid #e2e5ea; }
+    .doc-thanks { font-size: 1rem; font-weight: 700; color: var(--ink); margin-bottom: 8px; }
+    .doc-terms { color: var(--sub); font-size: 0.8rem; line-height: 1.6; }
     .preview-banner {
       position: sticky; top: 0; background: #b8860b; color: #fff; text-align: center;
       padding: 8px; font-weight: 700; letter-spacing: .05em;
@@ -2629,18 +2643,45 @@ const INVOICE_STYLE = `
       .preview-banner { position: static; margin: 0 -20px 20px; }
     }`;
 
-function invoiceHeaderHtml(clientName, invoiceNum, subtitle, docLabel) {
+function invoiceHeaderHtml(docLabel) {
   return `
   <div class="invoice-header">
     <img src="https://mtwall2026.github.io/consulting-tracker/logo.png" alt="Cirrobound Solutions" />
     <div class="company">
-      <h2>Cirrobound Solutions</h2>
-      <p>${subtitle}</p>
+      <div class="doc-title">${docLabel || 'Invoice'}</div>
+      <h2>Cirrobound Solutions LLC</h2>
+      <p>1012 Oak Glen Court<br>Spartanburg, South Carolina 29303<br>United States</p>
+      <p style="margin-top:6px">Mobile: 864-381-7793</p>
     </div>
   </div>
-  <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:6px">
-    <h1 style="margin:0">${docLabel || 'Invoice'} — ${clientName}</h1>
-    <span style="font-size:1rem;font-weight:700;color:#333">${invoiceNum}</span>
+  <div class="doc-divider"></div>`;
+}
+
+// Bill To (left) + a stack of label/value lines (right) — Invoice #, period,
+// date, etc. Shared across all document types so every invoice/statement
+// shows the same at-a-glance metadata block, matching the layout of the
+// invoices Taylor already sends via Wave.
+function invoiceMetaRowHtml(clientName, rightLines) {
+  return `
+  <div class="bill-to-row">
+    <div>
+      <div class="field-label">Bill To</div>
+      <div class="value">${clientName}</div>
+    </div>
+    <div class="right">
+      ${rightLines.map(l => `<div style="margin-bottom:3px;font-size:0.88rem"><span style="color:var(--sub)">${l.label}:</span> <strong>${l.value}</strong></div>`).join('')}
+    </div>
+  </div>`;
+}
+
+// Closing block shared by every document type — a simple "thank you" plus
+// payment terms, standing in for the signature/terms section a client-
+// facing invoice/statement is expected to have.
+function invoiceFooterHtml() {
+  return `
+  <div class="doc-footer">
+    <div class="doc-thanks">Thank you for your business!</div>
+    <div class="doc-terms">Payment due within 15 days of the invoice date. Questions about this invoice? Just reply to the email it was sent with.</div>
   </div>`;
 }
 
@@ -2689,18 +2730,12 @@ function renderFeeInvoiceHtml(data, invoiceNum, isPreview) {
   const dateGenerated = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
   return `<!DOCTYPE html><html><head><title>Invoice – ${client.name}</title><style>${INVOICE_STYLE}</style></head><body>
     ${previewBannerHtml(isPreview)}
-    ${invoiceHeaderHtml(client.name, invoiceNum, 'Consulting Invoice — Retainer Fee')}
-    <div class="bill-to-row">
-      <div>
-        <div class="field-label">Bill To</div>
-        <div class="value">${client.name}</div>
-      </div>
-      <div class="right">
-        <div class="field-label">Billing Period</div>
-        <div class="value">${monthLabel}</div>
-        <div style="color:#888;font-size:0.8rem;margin-top:2px">Invoice Date: ${dateGenerated}</div>
-      </div>
-    </div>
+    ${invoiceHeaderHtml('Invoice')}
+    ${invoiceMetaRowHtml(client.name, [
+      { label: 'Invoice #', value: invoiceNum },
+      { label: 'Billing Period', value: monthLabel },
+      { label: 'Invoice Date', value: dateGenerated },
+    ])}
     ${retainerDescription ? `
     <div class="engagement-box">
       <div class="field-label">Scope of Engagement</div>
@@ -2711,6 +2746,7 @@ function renderFeeInvoiceHtml(data, invoiceNum, isPreview) {
       <div class="note">Monthly Retainer Fee — ${planNote}</div>
     </div>
     <div class="grand-total">Grand Total: ${fmtMoney(fee)}</div>
+    ${invoiceFooterHtml()}
     ${autoPrintScript(isPreview)}
     </body></html>`;
 }
@@ -2799,18 +2835,13 @@ function renderOverageInvoiceHtml(data, invoiceNum, isPreview) {
     : `<tr><td colspan="6" style="color:#555;font-style:italic">No overage this month — this is a summary of the ${hours.toFixed(1)}h of retainer work completed.</td></tr>`;
   return `<!DOCTYPE html><html><head><title>Invoice – ${client.name}</title><style>${INVOICE_STYLE}</style></head><body>
     ${previewBannerHtml(isPreview)}
-    ${invoiceHeaderHtml(client.name, invoiceNum, hasOverage ? 'Consulting Invoice — Retainer Overage' : 'Monthly Summary — Retainer Work')}
-    <div class="bill-to-row">
-      <div>
-        <div class="field-label">Bill To</div>
-        <div class="value">${client.name}</div>
-      </div>
-      <div class="right">
-        <div class="field-label">Billing Period</div>
-        <div class="value">${monthLabel}</div>
-        <div style="color:#888;font-size:0.8rem;margin-top:2px">${hours.toFixed(1)}h logged (${includedHours}h included) &nbsp;·&nbsp; Invoice Date: ${dateGenerated}</div>
-      </div>
-    </div>
+    ${invoiceHeaderHtml(hasOverage ? 'Invoice' : 'Summary')}
+    ${invoiceMetaRowHtml(client.name, [
+      { label: 'Invoice #', value: invoiceNum },
+      { label: 'Billing Period', value: monthLabel },
+      { label: 'Hours Logged', value: `${hours.toFixed(1)}h (${includedHours}h included)` },
+      { label: 'Invoice Date', value: dateGenerated },
+    ])}
     ${retainerDescription ? `
     <div class="engagement-box">
       <div class="field-label">Scope of Engagement</div>
@@ -2831,6 +2862,7 @@ function renderOverageInvoiceHtml(data, invoiceNum, isPreview) {
       </tbody>
     </table>` : ''}
     <div class="grand-total">Grand Total: ${fmtMoney(grandTotal)}</div>
+    ${invoiceFooterHtml()}
     ${autoPrintScript(isPreview)}
     </body></html>`;
 }
@@ -2971,17 +3003,12 @@ function renderStatementInvoiceHtml(data, invoiceNum, isPreview) {
     .due-terms { color: #888; font-size: 0.8rem; margin-top: 4px; }
   </style></head><body>
     ${previewBannerHtml(isPreview)}
-    ${invoiceHeaderHtml(client.name, invoiceNum, `Monthly Retainer Statement — ${monthLabel}`, 'Statement')}
-    <div class="bill-to-row">
-      <div>
-        <div class="field-label">Bill To</div>
-        <div class="value">${client.name}</div>
-      </div>
-      <div class="right">
-        <div class="field-label">Statement Date</div>
-        <div class="value">${dateGenerated}</div>
-      </div>
-    </div>
+    ${invoiceHeaderHtml('Statement')}
+    ${invoiceMetaRowHtml(client.name, [
+      { label: 'Invoice #', value: invoiceNum },
+      { label: 'Statement Period', value: monthLabel },
+      { label: 'Statement Date', value: dateGenerated },
+    ])}
     ${retainerDescription ? `
     <div class="engagement-box">
       <div class="field-label">Scope of Engagement</div>
@@ -3000,7 +3027,7 @@ function renderStatementInvoiceHtml(data, invoiceNum, isPreview) {
         <tr class="total-row"><td>Total Due</td><td style="text-align:right">${fmtMoney(grandTotal)}</td></tr>
       </tbody>
     </table>
-    <div class="due-terms">Due: Net 15</div>
+    ${invoiceFooterHtml()}
     ${autoPrintScript(isPreview)}
     </body></html>`;
 }
