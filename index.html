@@ -2627,21 +2627,21 @@ const INVOICE_STYLE = `
     .doc-footer { margin-top: 36px; padding-top: 18px; border-top: 1px solid #e2e5ea; }
     .doc-thanks { font-size: 1rem; font-weight: 700; color: var(--ink); margin-bottom: 8px; }
     .doc-terms { color: var(--sub); font-size: 0.8rem; line-height: 1.6; }
+    /* Deliberately a plain block — no position:sticky, no negative margins.
+       An earlier version used sticky+negative-margin to pull this banner
+       above the page padding on screen, with a @media print override to
+       reset it — but position:sticky is known to behave inconsistently
+       across browsers' print/PDF engines regardless of the override, and
+       it kept clipping the top of the printed page. A normal block in the
+       regular content flow can't clip, on screen or in print — full stop. */
     .preview-banner {
-      position: sticky; top: 0; background: #b8860b; color: #fff; text-align: center;
-      padding: 8px; font-weight: 700; letter-spacing: .05em;
+      background: #b8860b; color: #fff; text-align: center;
+      padding: 10px 16px; font-weight: 700; letter-spacing: .05em;
       display: flex; align-items: center; justify-content: center; gap: 16px;
-      margin: -40px -40px 20px -40px;
+      border-radius: 6px; margin-bottom: 24px;
     }
     .preview-banner button { background: #fff; color: #b8860b; border: none; border-radius: 4px; padding: 4px 12px; font-weight: 700; cursor: pointer; }
-    @media print {
-      body { padding: 20px; }
-      /* The banner's negative margins are a screen-only trick to pull it
-         above the page padding — sticky positioning + negative margins
-         don't translate to the print layout and were clipping the top of
-         the page. Reset to a normal, non-sticky block when printing. */
-      .preview-banner { position: static; margin: 0 -20px 20px; }
-    }`;
+    @media print { body { padding: 20px; } }`;
 
 function invoiceHeaderHtml(docLabel) {
   return `
