@@ -2051,7 +2051,7 @@ function findKeyForInvoiceNumber(num, excludeKey) {
 function describeInvoiceKey(key) {
   const rec = (state.invoiceHistory || []).find(h => h.key === key && !h.voided);
   if (!rec) return key;
-  const kindLabel = { general: 'General', fee: 'Fee', overage: 'Monthly Summary' };
+  const kindLabel = { general: 'General', fee: 'Fee', overage: 'Monthly Summary', statement: 'Retainer Statement' };
   const period = rec.month ? new Date(rec.month + '-02').toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : 'All Time';
   return `${rec.clientName} – ${kindLabel[rec.kind] || rec.kind} – ${period}`;
 }
@@ -2580,6 +2580,36 @@ function findNextUnbilledOverageMonth(client) {
   }
 }
 
+function prevMonthStr(monthStr) {
+  let [y, m] = monthStr.split('-').map(Number);
+  m--; if (m < 1) { m = 12; y--; }
+  return `${y}-${String(m).padStart(2, '0')}`;
+}
+
+// Combined "Monthly Retainer Statement" — replaces the old separate Fee +
+// Monthly Summary invoices going forward (kept above for reprinting
+// invoices generated before this existed). One document per month: the
+// current month's flat fee, due immediately just like the old Fee
+// invoice, plus a recap and overage charge for the PRIOR month, now that
+// it's fully closed and its hours are known.
+//
+// A month already billed under the OLD separate Fee flow (a '-fee' key
+// from before this feature existed) counts as already handled, so
+// switching a client over mid-stream can't double-bill that transition
+// month's flat fee.
+function findNextUnbilledStatementMonth(client) {
+  if (!client || client.billingType !== 'retainer' || !client.retainerStartDate) return null;
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  let [y, m] = client.retainerStartDate.slice(0, 7).split('-').map(Number);
+  while (true) {
+    const monthStr = `${y}-${String(m).padStart(2, '0')}`;
+    const alreadyDone = monthAlreadyInvoiced(client, monthStr, 'statement') || monthAlreadyInvoiced(client, monthStr, 'fee');
+    if (!alreadyDone) return monthStr;
+    if (monthStr >= currentMonth) return null;
+    m++; if (m > 12) { m = 1; y++; }
+  }
+}
+
 const INVOICE_STYLE = `
     body { font-family: 'Segoe UI', sans-serif; color: #111; padding: 40px; max-width: 800px; margin: 0 auto; }
     .invoice-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 32px; border-bottom: 2px solid #111; padding-bottom: 20px; }
@@ -2828,6 +2858,196 @@ function generateOverageInvoice(clientId, month, mode, invoiceNumOverride) {
   renderRetainersList();
 }
 
+// ── Combined Monthly Retainer Statement ────────────────
+// One document: Section 1 recaps the PRIOR (now-closed) month's work and
+// any overage; Section 2 is the CURRENT month's invoice (flat fee + that
+// prior overage, if any). Replaces generating Fee and Monthly Summary as
+// two separate documents/numbers.
+function buildStatementInvoiceData(clientId, month) {
+  const client = state.clients.find(c => c.id === clientId);
+  if (!client) return null;
+  const monthLabel = new Date(month + '-02').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  const fee = client.retainerAmount || 0;
+  const planNote = `Includes ${client.retainerHours || 0}h/mo, overage billed at ${fmtMoney(client.overageRate || client.rate)}/hr`;
+  const retainerDescription = client.retainerDescription || '';
+
+  const prevMonth = prevMonthStr(month);
+  // Only recap the prior month if the retainer actually covered it, and it
+  // wasn't already billed separately under the old Overage flow (avoids
+  // double-charging a month handled before this feature existed).
+  const includePriorMonth = !!client.retainerStartDate
+    && prevMonth >= client.retainerStartDate.slice(0, 7)
+    && !monthAlreadyInvoiced(client, prevMonth, 'overage');
+
+  let priorMonthLabel = null, entries = [], expenses = [], hours = 0, includedHours = 0,
+      overageRate = 0, overageHours = 0, overageAmount = 0, expensesTotal = 0;
+  if (includePriorMonth) {
+    const od = buildOverageInvoiceData(clientId, prevMonth);
+    priorMonthLabel = od.monthLabel;
+    entries = od.entries; expenses = od.expenses; hours = od.hours; includedHours = od.includedHours;
+    overageRate = od.overageRate; overageHours = od.overageHours; overageAmount = od.overageAmount; expensesTotal = od.expensesTotal;
+  }
+
+  const grandTotal = fee + overageAmount + expensesTotal;
+
+  return {
+    client, fee, monthLabel, planNote, retainerDescription,
+    includePriorMonth, priorMonthLabel, entries, expenses, hours, includedHours,
+    overageRate, overageHours, overageAmount, expensesTotal, grandTotal
+  };
+}
+
+function renderStatementInvoiceText(data, invoiceNum) {
+  const { client, fee, monthLabel, planNote, retainerDescription, includePriorMonth, priorMonthLabel,
+          entries, expenses, hours, includedHours, overageRate, overageHours, overageAmount, expensesTotal, grandTotal } = data;
+  const hasOverage = overageHours > 0;
+  const dateGenerated = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+
+  const COL_W = [12, 8, 18, 12, 20, 8];
+  const padR = (s, w) => String(s).slice(0, w).padEnd(w);
+  const headerRow = [padR('Date', COL_W[0]), padR('Time', COL_W[1]), padR('Event', COL_W[2]), padR('Location', COL_W[3]), padR('Description', COL_W[4]), padR('Duration', COL_W[5])].join('  ');
+  const divider = '-'.repeat(headerRow.length);
+  const entryRows = entries.map(e => [padR(fmtDate(e.date), COL_W[0]), padR(e.time || '—', COL_W[1]), padR(e.note || '—', COL_W[2]), padR(e.location || '—', COL_W[3]), padR(e.noteText || '—', COL_W[4]), padR(fmtDur(e.minutes), COL_W[5])].join('  ')).join('\n');
+  const expenseLines = expenses.length ? [
+    '', `${priorMonthLabel} EXPENSES`,
+    ...expenses.map(e => `  ${fmtDate(e.date)}  ${e.category}  ${e.description || '—'}  ${fmtMoney(e.amount)}`),
+    `EXPENSES SUBTOTAL: ${fmtMoney(expensesTotal)}`,
+  ].join('\n') : '';
+
+  const section1 = includePriorMonth ? [
+    `SECTION 1: ${priorMonthLabel} ACTIVITY SUMMARY`, '-'.repeat(40), '',
+    divider, headerRow, divider, (entries.length ? entryRows : '(no hours logged this period)'), divider, '',
+    `Hours used: ${hours.toFixed(2)} of ${includedHours} included`,
+    hasOverage
+      ? `Overage: ${overageHours.toFixed(2)} hrs @ ${fmtMoney(overageRate)}/hr = ${fmtMoney(overageAmount)}`
+      : 'No overage this period.',
+    expenseLines, ''
+  ] : [];
+
+  return [
+    'CIRROBOUND SOLUTIONS', `MONTHLY RETAINER STATEMENT — ${monthLabel.toUpperCase()}`, '='.repeat(50), '',
+    `Invoice #:    ${invoiceNum}`, `Bill To:      ${client.name}`, `Invoice Date: ${dateGenerated}`, '',
+    ...(retainerDescription ? ['SCOPE OF ENGAGEMENT', retainerDescription, ''] : []),
+    ...section1,
+    `SECTION 2: ${monthLabel.toUpperCase()} INVOICE`, '-'.repeat(40), '',
+    `Monthly Retainer Fee: ${fmtMoney(fee)}`, `  ${planNote}`,
+    ...(includePriorMonth && hasOverage ? [`${priorMonthLabel} Overage Charge: ${fmtMoney(overageAmount)}`] : []),
+    ...(includePriorMonth && expensesTotal > 0 ? [`${priorMonthLabel} Expenses: ${fmtMoney(expensesTotal)}`] : []),
+    '', `TOTAL DUE: ${fmtMoney(grandTotal)}`, 'Due: Net 15', '', '--', 'Cirrobound Solutions',
+  ].join('\n');
+}
+
+function renderStatementInvoiceHtml(data, invoiceNum, isPreview) {
+  const { client, fee, monthLabel, planNote, retainerDescription, includePriorMonth, priorMonthLabel,
+          entries, expenses, hours, includedHours, overageRate, overageHours, overageAmount, expensesTotal, grandTotal } = data;
+  const hasOverage = overageHours > 0;
+  const dateGenerated = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+
+  const rows = entries.map(e => `
+      <tr>
+        <td>${fmtDate(e.date)}</td><td>${e.time || '—'}</td><td>${e.note || '—'}</td>
+        <td>${e.location || '—'}</td><td>${e.noteText || '—'}</td><td>${fmtDur(e.minutes)}</td>
+      </tr>`).join('');
+  const expenseRows = expenses.map(e => `
+      <tr><td>${fmtDate(e.date)}</td><td>${e.category}</td><td>${e.description || '—'}</td><td>${fmtMoney(e.amount)}</td></tr>`).join('');
+
+  const section1Html = includePriorMonth ? `
+    <div class="stmt-section-title">Section 1 — ${priorMonthLabel} Activity Summary</div>
+    <table>
+      <thead><tr><th>Date</th><th>Time</th><th>Event</th><th>Location</th><th>Description</th><th>Duration</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="6" style="color:#888;font-style:italic">No hours logged this period.</td></tr>`}</tbody>
+    </table>
+    <div style="margin-top:10px;font-size:0.88rem;color:#333">
+      Hours used: <strong>${hours.toFixed(2)} of ${includedHours} included</strong>
+      ${hasOverage
+        ? ` &nbsp;·&nbsp; Overage: <strong>${overageHours.toFixed(2)} hrs @ ${fmtMoney(overageRate)}/hr = ${fmtMoney(overageAmount)}</strong>`
+        : ' &nbsp;·&nbsp; No overage this period.'}
+    </div>
+    ${expenses.length ? `
+    <h2 class="section">${priorMonthLabel} Expenses</h2>
+    <table>
+      <thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Amount</th></tr></thead>
+      <tbody>${expenseRows}
+        <tr class="total-row"><td colspan="3">Expenses Subtotal</td><td>${fmtMoney(expensesTotal)}</td></tr>
+      </tbody>
+    </table>` : ''}
+  ` : '';
+
+  return `<!DOCTYPE html><html><head><title>Statement – ${client.name}</title><style>${INVOICE_STYLE}
+    .stmt-section-title { font-size: 0.95rem; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; margin: 26px 0 14px; padding-bottom: 6px; border-bottom: 1px solid #ddd; color: #111; }
+    .due-terms { color: #888; font-size: 0.8rem; margin-top: 4px; }
+  </style></head><body>
+    ${previewBannerHtml(isPreview)}
+    ${invoiceHeaderHtml(client.name, invoiceNum, `Monthly Retainer Statement — ${monthLabel}`)}
+    <div class="bill-to-row">
+      <div>
+        <div class="field-label">Bill To</div>
+        <div class="value">${client.name}</div>
+      </div>
+      <div class="right">
+        <div class="field-label">Statement Date</div>
+        <div class="value">${dateGenerated}</div>
+      </div>
+    </div>
+    ${retainerDescription ? `
+    <div class="engagement-box">
+      <div class="field-label">Scope of Engagement</div>
+      <p>${retainerDescription}</p>
+    </div>` : ''}
+    ${section1Html}
+    <div class="stmt-section-title">Section 2 — ${monthLabel} Invoice</div>
+    <table>
+      <tbody>
+        <tr><td>Monthly Retainer Fee</td><td style="text-align:right">${fmtMoney(fee)}</td></tr>
+        ${includePriorMonth && hasOverage ? `<tr><td>${priorMonthLabel} Overage Charge</td><td style="text-align:right">${fmtMoney(overageAmount)}</td></tr>` : ''}
+        ${includePriorMonth && expensesTotal > 0 ? `<tr><td>${priorMonthLabel} Expenses</td><td style="text-align:right">${fmtMoney(expensesTotal)}</td></tr>` : ''}
+        <tr class="total-row"><td>Total Due</td><td style="text-align:right">${fmtMoney(grandTotal)}</td></tr>
+      </tbody>
+    </table>
+    <div class="due-terms">Due: Net 15</div>
+    <div style="color:#888;font-size:0.85rem;margin-top:10px">${planNote}</div>
+    ${autoPrintScript(isPreview)}
+    </body></html>`;
+}
+
+function generateStatementInvoice(clientId, month, mode, invoiceNumOverride) {
+  const data = buildStatementInvoiceData(clientId, month);
+  if (!data) return;
+  const key = `${clientId}-${month}-statement`;
+  const invoiceNum = getOrAssignInvoiceNumber(key, invoiceNumOverride);
+  if (!invoiceNum) return; // conflict — getOrAssignInvoiceNumber already alerted
+  if (mode === 'email') {
+    sendInvoiceMailto(`${invoiceNum} – ${data.client.name} – ${data.monthLabel} Retainer Statement`, renderStatementInvoiceText(data, invoiceNum));
+  } else {
+    openInvoiceWindow(renderStatementInvoiceHtml(data, invoiceNum, false));
+  }
+  recordInvoiceHistory({ key, kind: 'statement', clientId, clientName: data.client.name, month, invoiceNum, mode, data });
+  renderRetainersList();
+}
+
+function generateStatementInvoiceForClient(clientId, mode) {
+  const client = state.clients.find(c => c.id === clientId);
+  if (!client) return;
+  const month = findNextUnbilledStatementMonth(client);
+  if (!month) {
+    alert(client.retainerStartDate ? 'Statements are all caught up.' : 'Set a retainer start date first.');
+    return;
+  }
+  const key = `${clientId}-${month}-statement`;
+  const suggested = (state.invoiceNumbers && state.invoiceNumbers[key]) || `INV-${state.nextInvoiceNum || 1001}`;
+  const typed = prompt('Invoice number for this Monthly Statement (edit if it needs to be out of the usual order):', suggested);
+  if (typed === null) return; // cancelled
+  generateStatementInvoice(clientId, month, mode, typed);
+}
+
+function previewStatementInvoice(clientId, month) {
+  const client = state.clients.find(c => c.id === clientId);
+  if (!client) return;
+  const data = buildStatementInvoiceData(clientId, month || new Date().toISOString().slice(0, 7));
+  if (!data) return;
+  openInvoiceWindow(renderStatementInvoiceHtml(data, 'PREVIEW', true));
+}
+
 function generateFeeInvoiceForClient(clientId, mode) {
   const client = state.clients.find(c => c.id === clientId);
   if (!client) return;
@@ -2870,7 +3090,7 @@ function renderRetainersList() {
     <table>
       <thead><tr>
         <th>Client</th><th>Retainer</th><th>Included</th><th>Overage Rate</th>
-        <th>Starts</th><th>This Month</th><th>Fee Invoice</th><th>Monthly Summary</th>
+        <th>Starts</th><th>This Month</th><th>Monthly Statement</th>
       </tr></thead>
       <tbody>
         ${retainerClients.map(c => {
@@ -2879,8 +3099,7 @@ function renderRetainersList() {
             .reduce((s, e) => s + e.minutes, 0) / 60;
           const included = c.retainerHours || 0;
           const over = Math.max(0, hoursThisMonth - included);
-          const feeMonth = findNextUnbilledFeeMonth(c);
-          const overageMonth = findNextUnbilledOverageMonth(c);
+          const statementMonth = findNextUnbilledStatementMonth(c);
           return `
           <tr>
             <td><span class="badge">${c.name}</span></td>
@@ -2890,24 +3109,16 @@ function renderRetainersList() {
             <td>${c.retainerStartDate ? fmtDate(c.retainerStartDate) : '—'}</td>
             <td>${hoursThisMonth.toFixed(1)}h${over > 0 ? ` <span style="color:var(--danger)">(+${over.toFixed(1)}h over)</span>` : ''}</td>
             <td>
-              <div style="margin-bottom:6px">${feeMonth ? monthLabel(feeMonth) : '<span style="color:var(--muted)">Caught up</span>'}</div>
+              <div style="margin-bottom:6px">${statementMonth ? monthLabel(statementMonth) : '<span style="color:var(--muted)">Caught up</span>'}</div>
               <div style="display:flex;gap:6px">
-                <button class="btn btn-ghost btn-sm" onclick="previewFeeInvoice('${c.id}', '${feeMonth || currentMonth}')" style="color:var(--muted)">Preview</button>
-                <button class="btn btn-primary btn-sm" onclick="generateFeeInvoiceForClient('${c.id}', 'print')" ${feeMonth ? '' : 'disabled'}>Generate</button>
-                <button class="btn btn-ghost btn-sm" onclick="generateFeeInvoiceForClient('${c.id}', 'email')" ${feeMonth ? '' : 'disabled'}>Email</button>
-              </div>
-            </td>
-            <td>
-              <div style="margin-bottom:6px">${overageMonth ? monthLabel(overageMonth) : '<span style="color:var(--muted)">Caught up</span>'}</div>
-              <div style="display:flex;gap:6px">
-                <button class="btn btn-ghost btn-sm" onclick="previewOverageInvoice('${c.id}', '${overageMonth || currentMonth}')" style="color:var(--muted)">Preview</button>
-                <button class="btn btn-primary btn-sm" onclick="generateOverageInvoiceForClient('${c.id}', 'print')" ${overageMonth ? '' : 'disabled'}>Generate</button>
-                <button class="btn btn-ghost btn-sm" onclick="generateOverageInvoiceForClient('${c.id}', 'email')" ${overageMonth ? '' : 'disabled'}>Email</button>
+                <button class="btn btn-ghost btn-sm" onclick="previewStatementInvoice('${c.id}', '${statementMonth || currentMonth}')" style="color:var(--muted)">Preview</button>
+                <button class="btn btn-primary btn-sm" onclick="generateStatementInvoiceForClient('${c.id}', 'print')" ${statementMonth ? '' : 'disabled'}>Generate</button>
+                <button class="btn btn-ghost btn-sm" onclick="generateStatementInvoiceForClient('${c.id}', 'email')" ${statementMonth ? '' : 'disabled'}>Email</button>
               </div>
             </td>
           </tr>
           <tr>
-            <td colspan="8" style="padding-top:0">
+            <td colspan="7" style="padding-top:0">
               <div style="display:flex;gap:10px;align-items:flex-start;padding-top:2px">
                 <span style="font-size:0.72rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);white-space:nowrap;padding-top:7px">Scope of Engagement</span>
                 <textarea rows="1" placeholder="What this client's retainer covers — shown on their invoices" onblur="saveRetainerDescription('${c.id}', this.value)" style="flex:1;resize:vertical;font-family:inherit;font-size:0.85rem;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 10px;outline:none">${c.retainerDescription || ''}</textarea>
@@ -2946,10 +3157,11 @@ function dateChipHtml(historyId, isoDate, setterFn, label) {
 // could have changed since (e.g. converted to retainer afterward).
 function invoiceKindLabel(r) {
   if (r.kind === 'fee') return 'Retainer';
-  if (r.kind === 'overage') {
-    // The Monthly Summary document doubles as the overage invoice when a
-    // month actually went over — flag those specifically so they stand
-    // out from a plain no-charge summary or the flat Fee invoice.
+  if (r.kind === 'overage' || r.kind === 'statement') {
+    // The Monthly Summary (and the combined Statement that replaced it)
+    // doubles as the overage invoice when a month actually went over —
+    // flag those specifically so they stand out from a plain no-charge
+    // summary or the flat Fee invoice.
     const overageHours = r.snapshot && r.snapshot.overageHours;
     return overageHours > 0 ? 'Hours Over' : 'Retainer';
   }
@@ -3066,14 +3278,16 @@ function reprintInvoice(historyId, mode) {
 
   const periodLabel = rec.month || 'Reprint';
   if (mode === 'email') {
-    const text = rec.kind === 'general' ? renderGeneralInvoiceText(rec.snapshot, rec.invoiceNum)
-               : rec.kind === 'fee'     ? renderFeeInvoiceText(rec.snapshot, rec.invoiceNum)
-               :                          renderOverageInvoiceText(rec.snapshot, rec.invoiceNum);
+    const text = rec.kind === 'general'   ? renderGeneralInvoiceText(rec.snapshot, rec.invoiceNum)
+               : rec.kind === 'fee'       ? renderFeeInvoiceText(rec.snapshot, rec.invoiceNum)
+               : rec.kind === 'statement' ? renderStatementInvoiceText(rec.snapshot, rec.invoiceNum)
+               :                            renderOverageInvoiceText(rec.snapshot, rec.invoiceNum);
     sendInvoiceMailto(`${rec.invoiceNum} – ${rec.clientName} – ${periodLabel} (Reprint)`, text);
   } else {
-    const html = rec.kind === 'general' ? renderGeneralInvoiceHtml(rec.snapshot, rec.invoiceNum, false)
-               : rec.kind === 'fee'     ? renderFeeInvoiceHtml(rec.snapshot, rec.invoiceNum, false)
-               :                          renderOverageInvoiceHtml(rec.snapshot, rec.invoiceNum, false);
+    const html = rec.kind === 'general'   ? renderGeneralInvoiceHtml(rec.snapshot, rec.invoiceNum, false)
+               : rec.kind === 'fee'       ? renderFeeInvoiceHtml(rec.snapshot, rec.invoiceNum, false)
+               : rec.kind === 'statement' ? renderStatementInvoiceHtml(rec.snapshot, rec.invoiceNum, false)
+               :                            renderOverageInvoiceHtml(rec.snapshot, rec.invoiceNum, false);
     openInvoiceWindow(html);
   }
 }
