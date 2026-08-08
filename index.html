@@ -653,6 +653,11 @@ function switchView(view) {
   document.getElementById('tabExpenses').classList.toggle('active', view === 'expenses');
   document.getElementById('tabRetainers').classList.toggle('active', view === 'retainers');
   document.getElementById('tabInvoiceHistory').classList.toggle('active', view === 'invoiceHistory');
+  // The general Print Invoice button predates the retainer Statement flow
+  // and doesn't know about retainer fees/overage — only meaningful on Time
+  // Tracking (its original home), so it's hidden everywhere else to avoid
+  // it being clicked by mistake for a retainer client on another tab.
+  document.getElementById('btnPrintInvoice').style.display = view === 'timeTracking' ? '' : 'none';
   // Chart.js can't size a canvas correctly while its container is
   // display:none, so redraw whichever page's charts just became visible.
   if (view === 'timeTracking') renderCharts();
