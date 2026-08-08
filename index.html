@@ -2586,6 +2586,12 @@ function prevMonthStr(monthStr) {
   return `${y}-${String(m).padStart(2, '0')}`;
 }
 
+function nextMonthStr(monthStr) {
+  let [y, m] = monthStr.split('-').map(Number);
+  m++; if (m > 12) { m = 1; y++; }
+  return `${y}-${String(m).padStart(2, '0')}`;
+}
+
 // Combined "Monthly Retainer Statement" — replaces the old separate Fee +
 // Monthly Summary invoices going forward (kept above for reprinting
 // invoices generated before this existed). One document per month: the
@@ -3111,7 +3117,7 @@ function renderRetainersList() {
             <td>
               <div style="margin-bottom:6px">${statementMonth ? monthLabel(statementMonth) : '<span style="color:var(--muted)">Caught up</span>'}</div>
               <div style="display:flex;gap:6px">
-                <button class="btn btn-ghost btn-sm" onclick="previewStatementInvoice('${c.id}', '${statementMonth || currentMonth}')" style="color:var(--muted)">Preview</button>
+                <button class="btn btn-ghost btn-sm" onclick="previewStatementInvoice('${c.id}', '${statementMonth || nextMonthStr(currentMonth)}')" style="color:var(--muted)" title="${statementMonth ? 'Preview the due statement' : 'Preview a projection of next month’s statement, using hours logged so far'}">Preview</button>
                 <button class="btn btn-primary btn-sm" onclick="generateStatementInvoiceForClient('${c.id}', 'print')" ${statementMonth ? '' : 'disabled'}>Generate</button>
                 <button class="btn btn-ghost btn-sm" onclick="generateStatementInvoiceForClient('${c.id}', 'email')" ${statementMonth ? '' : 'disabled'}>Email</button>
               </div>
