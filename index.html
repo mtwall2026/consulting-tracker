@@ -311,7 +311,6 @@
       <div style="display:flex;gap:10px">
         <button class="btn btn-ghost" onclick="closeInvoiceModal()">Cancel</button>
         <button class="btn btn-ghost" onclick="previewGeneralInvoice()" style="color:var(--muted)">&#128065; Preview</button>
-        <button class="btn btn-ghost" onclick="emailInvoice()" style="color:var(--accent2)">&#9993; Email</button>
         <button class="btn btn-primary" onclick="confirmInvoice()">Generate</button>
       </div>
     </div>
@@ -2410,26 +2409,6 @@ function previewOverageInvoice(clientId, month) {
   const data = buildOverageInvoiceData(clientId, month || new Date().toISOString().slice(0, 7));
   if (!data) return;
   openInvoiceWindow(renderOverageInvoiceHtml(data, 'PREVIEW', true));
-}
-
-// ── Email Invoice ──────────────────────────────────────
-// explicitClientId/explicitMonth let the Retainers tab's "Generate Next
-// Invoice" reuse this exact same invoice logic instead of requiring the
-// client+month picker modal.
-function emailInvoice(explicitClientId, explicitMonth) {
-  const filterClient = explicitClientId || document.getElementById('invoiceClientPick').value;
-  const filterMonth   = explicitMonth !== undefined ? explicitMonth : document.getElementById('invoiceMonthPick').value;
-  // Only the modal-triggered call has a typed override to honor.
-  const typedInvoiceNum = explicitClientId ? null : document.getElementById('invoiceNumInput').value;
-  closeInvoiceModal();
-  if (!filterClient) return;
-
-  const invoiceKey = `${filterClient}-${filterMonth || 'all'}`;
-  const invoiceNum = getOrAssignInvoiceNumber(invoiceKey, typedInvoiceNum);
-  if (!invoiceNum) return; // conflict — getOrAssignInvoiceNumber already alerted
-  const data = buildGeneralInvoiceData(filterClient, filterMonth);
-  sendInvoiceMailto(`${invoiceNum} – ${data.clientName} – ${data.monthLabel}`, renderGeneralInvoiceText(data, invoiceNum));
-  recordInvoiceHistory({ key: invoiceKey, kind: 'general', clientId: filterClient, clientName: data.clientName, month: filterMonth || '', invoiceNum, mode: 'email', data });
 }
 
 function confirmInvoice(explicitClientId, explicitMonth) {
