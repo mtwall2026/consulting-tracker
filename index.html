@@ -307,8 +307,7 @@
       <span style="color:var(--muted)">Invoice #</span>
       <input type="text" id="invoiceNumInput" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--accent2);padding:6px 10px;font-size:0.9rem;text-align:right;width:140px;font-weight:700" />
     </div>
-    <div style="display:flex;gap:10px;justify-content:space-between;align-items:center">
-      <button class="btn btn-ghost btn-sm" onclick="resetInvoiceNumbers()" style="color:var(--danger);font-size:0.78rem">Reset Invoice #</button>
+    <div style="display:flex;gap:10px;justify-content:flex-end;align-items:center">
       <div style="display:flex;gap:10px">
         <button class="btn btn-ghost" onclick="closeInvoiceModal()">Cancel</button>
         <button class="btn btn-ghost" onclick="previewGeneralInvoice()" style="color:var(--muted)">&#128065; Preview</button>
@@ -2026,16 +2025,6 @@ function updateInvoicePreview() {
   document.getElementById('invoiceNumInput').value = num;
 }
 function closeInvoiceModal() { document.getElementById('invoiceModal').style.display = 'none'; }
-function resetInvoiceNumbers() {
-  if (!confirm('Reset invoice numbering back to INV-1001? This cannot be undone.')) return;
-  state.nextInvoiceNum = 1001;
-  state.invoiceNumbers = {};
-  save();
-  odAutoSave();
-  updateInvoicePreview();
-  alert('Invoice numbers reset to INV-1001.');
-}
-
 // Finds the OTHER key (if any) already using invoice number `num`, for
 // duplicate detection. `state.invoiceNumbers` only ever holds currently-
 // active mappings — voidInvoiceHistory() deletes a key's entry the moment
