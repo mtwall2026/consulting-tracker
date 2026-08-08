@@ -76,6 +76,7 @@
       background: none; border: none; cursor: pointer; padding: 0 2px;
     }
     .client-chip .del:hover { color: var(--danger); }
+    .client-chip .del.info:hover { color: var(--accent); }
 
     .add-client-row { display: flex; gap: 8px; flex-wrap: wrap; }
     .add-client-row input, .add-client-row select {
@@ -313,6 +314,30 @@
         <button class="btn btn-ghost" onclick="previewGeneralInvoice()" style="color:var(--muted)">&#128065; Preview</button>
         <button class="btn btn-primary" onclick="confirmInvoice()">Generate</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Client Info Modal (contact details shown under "Bill To" on invoices) -->
+<div id="clientInfoModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:999;align-items:center;justify-content:center">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:28px;min-width:320px;max-width:400px;display:flex;flex-direction:column;gap:16px">
+    <h2 style="margin:0" id="clientInfoModalTitle">Client Info</h2>
+    <input type="hidden" id="clientInfoClientId" />
+    <label style="display:flex;flex-direction:column;gap:6px;font-size:0.85rem;color:var(--muted)">Contact Name
+      <input type="text" id="clientInfoContactName" placeholder="e.g. Keith Black" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 10px;font-size:0.95rem" />
+    </label>
+    <label style="display:flex;flex-direction:column;gap:6px;font-size:0.85rem;color:var(--muted)">Address <span style="color:var(--muted);font-size:0.78rem">(one or more lines)</span>
+      <textarea id="clientInfoAddress" rows="3" placeholder="112 S Main St c&#10;Greer, South Carolina 29650&#10;United States" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 10px;font-size:0.95rem;font-family:inherit;resize:vertical"></textarea>
+    </label>
+    <label style="display:flex;flex-direction:column;gap:6px;font-size:0.85rem;color:var(--muted)">Phone
+      <input type="text" id="clientInfoPhone" placeholder="864-921-8668" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 10px;font-size:0.95rem" />
+    </label>
+    <label style="display:flex;flex-direction:column;gap:6px;font-size:0.85rem;color:var(--muted)">Email
+      <input type="email" id="clientInfoEmail" placeholder="keith.black@century3inc.com" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 10px;font-size:0.95rem" />
+    </label>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeClientInfoModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveClientInfo()">Save</button>
     </div>
   </div>
 </div>
@@ -751,6 +776,14 @@ function roundTimerElapsed(ms) {
 }
 function calcAmount(minutes, rate) { return (minutes / 60) * rate; }
 function fmtMoney(n) { return '$' + n.toFixed(2); }
+// "Payment Due" date shown on invoices — Net 15 from today (the invoice's
+// generation date), matching the "Payment Due" line on invoices already
+// sent via Wave.
+function netDueDateLabel(days) {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+}
 
 // True if a given entry falls under a retainer client's flat-fee coverage —
 // i.e. on/after client.retainerStartDate. An unset start date means the
@@ -918,6 +951,7 @@ function renderClients() {
     div.innerHTML = teamViewActive
       ? `<span>${c.name}</span><span class="rate">$${c.rate}/hr</span>`
       : `<span>${c.name}</span><span class="rate">$${c.rate}/hr</span>
+      <button class="del info" title="Edit contact info (shown on invoices)" onclick="openClientInfoModal('${c.id}')" style="font-size:0.8rem">&#9998;</button>
       <button class="del" title="Delete client" onclick="deleteClient('${c.id}')">×</button>`;
     if (!teamViewActive) div.addEventListener('click', e => { if (!e.target.classList.contains('del')) selectClient(c.id); });
     grid.appendChild(div);
@@ -2029,6 +2063,36 @@ function updateInvoicePreview() {
   document.getElementById('invoiceNumInput').value = num;
 }
 function closeInvoiceModal() { document.getElementById('invoiceModal').style.display = 'none'; }
+
+// Contact info (name/address/phone/email) shown under "Bill To" on
+// generated invoices/statements — optional, purely presentational, has no
+// effect on billing math.
+function openClientInfoModal(clientId) {
+  const c = state.clients.find(c => c.id === clientId);
+  if (!c) return;
+  document.getElementById('clientInfoModalTitle').textContent = `Client Info — ${c.name}`;
+  document.getElementById('clientInfoClientId').value = clientId;
+  document.getElementById('clientInfoContactName').value = c.contactName || '';
+  document.getElementById('clientInfoAddress').value = c.address || '';
+  document.getElementById('clientInfoPhone').value = c.phone || '';
+  document.getElementById('clientInfoEmail').value = c.email || '';
+  document.getElementById('clientInfoModal').style.display = 'flex';
+}
+function closeClientInfoModal() { document.getElementById('clientInfoModal').style.display = 'none'; }
+function saveClientInfo() {
+  const clientId = document.getElementById('clientInfoClientId').value;
+  const idx = state.clients.findIndex(c => c.id === clientId);
+  if (idx === -1) return;
+  state.clients[idx] = {
+    ...state.clients[idx],
+    contactName: document.getElementById('clientInfoContactName').value.trim(),
+    address: document.getElementById('clientInfoAddress').value.trim(),
+    phone: document.getElementById('clientInfoPhone').value.trim(),
+    email: document.getElementById('clientInfoEmail').value.trim(),
+  };
+  save(); render(); odAutoSave();
+  closeClientInfoModal();
+}
 // Finds the OTHER key (if any) already using invoice number `num`, for
 // duplicate detection. `state.invoiceNumbers` only ever holds currently-
 // active mappings — voidInvoiceHistory() deletes a key's entry the moment
@@ -2224,40 +2288,37 @@ function renderGeneralInvoiceHtml(data, invoiceNum, isPreview) {
 
   const rows = entries.map(e => {
     const billedAsRetainer = isEntryUnderRetainer(client, e);
+    const itemLine = [e.note, e.location, e.noteText].filter(Boolean).join(' — ');
     return `
     <tr>
-      <td>${fmtDate(e.date)}</td>
-      <td>${e.time || '—'}</td>
-      <td>${e.note || '—'}</td>
-      <td>${e.location || '—'}</td>
-      <td>${e.noteText || '—'}</td>
-      <td>${fmtDur(e.minutes)}</td>
-      <td>${billedAsRetainer ? '—' : '$' + e.rate + '/hr'}</td>
-      <td>${billedAsRetainer ? '—' : fmtMoney(calcAmount(e.minutes, e.rate))}</td>
+      <td><strong>${fmtDate(e.date)}</strong>${itemLine ? `<br><span style="color:var(--sub)">${itemLine}</span>` : ''}</td>
+      <td style="text-align:right">${(e.minutes / 60).toFixed(2)}</td>
+      <td style="text-align:right">${billedAsRetainer ? '—' : fmtMoney(e.rate) + '/hr'}</td>
+      <td style="text-align:right">${billedAsRetainer ? '—' : fmtMoney(calcAmount(e.minutes, e.rate))}</td>
     </tr>`;
   }).join('');
 
   const hoursSubtotalRows = billing.isRetainer ? `
       ${billing.hasPreRetainerHours ? `
       <tr>
-        <td colspan="7">Hourly Subtotal (before retainer)</td>
-        <td>${fmtMoney(billing.hourlyAmount)}</td>
+        <td colspan="3">Hourly Subtotal (before retainer)</td>
+        <td style="text-align:right">${fmtMoney(billing.hourlyAmount)}</td>
       </tr>` : ''}
       <tr>
-        <td colspan="7">Retainer Fee (${billing.months} mo${billing.months !== 1 ? 's' : ''} × ${fmtMoney(billing.fee / (billing.months || 1))})<br><span style="font-size:0.78rem;color:#777;font-weight:400">Includes ${client.retainerHours || 0}h/mo, overage billed at ${fmtMoney(client.overageRate || client.rate)}/hr</span></td>
-        <td>${fmtMoney(billing.fee)}</td>
+        <td colspan="3">Retainer Fee (${billing.months} mo${billing.months !== 1 ? 's' : ''} × ${fmtMoney(billing.fee / (billing.months || 1))})<br><span style="font-size:0.78rem;color:var(--sub);font-weight:400">Includes ${client.retainerHours || 0}h/mo, overage billed at ${fmtMoney(client.overageRate || client.rate)}/hr</span></td>
+        <td style="text-align:right">${fmtMoney(billing.fee)}</td>
       </tr>${billing.overageHours > 0 ? `
       <tr>
-        <td colspan="7">Overage (${billing.overageHours.toFixed(2)}h @ ${fmtMoney(billing.overageRate)}/hr)</td>
-        <td>${fmtMoney(billing.overageAmount)}</td>
+        <td colspan="3">Overage (${billing.overageHours.toFixed(2)}h @ ${fmtMoney(billing.overageRate)}/hr)</td>
+        <td style="text-align:right">${fmtMoney(billing.overageAmount)}</td>
       </tr>` : ''}
       <tr class="total-row">
-        <td colspan="7">Hours Subtotal</td>
-        <td>${fmtMoney(totalAmt)}</td>
+        <td colspan="3">Hours Subtotal</td>
+        <td style="text-align:right">${fmtMoney(totalAmt)}</td>
       </tr>` : `
       <tr class="total-row">
-        <td colspan="7">Hours Subtotal</td>
-        <td>${fmtMoney(totalAmt)}</td>
+        <td colspan="3">Hours Subtotal</td>
+        <td style="text-align:right">${fmtMoney(totalAmt)}</td>
       </tr>`;
 
   const expenseRows = expenses.map(e => `
@@ -2272,14 +2333,15 @@ function renderGeneralInvoiceHtml(data, invoiceNum, isPreview) {
   <style>${INVOICE_STYLE}</style></head><body>
   ${previewBannerHtml(isPreview)}
   ${invoiceHeaderHtml('Invoice')}
-  ${invoiceMetaRowHtml(clientName, [
+  ${invoiceMetaRowHtml(client, [
     { label: 'Invoice #', value: invoiceNum },
     { label: 'Period', value: monthLabel },
     { label: 'Hours Logged', value: fmtDur(totalMin) },
     { label: 'Invoice Date', value: new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) },
-  ])}
+    { label: 'Payment Due', value: netDueDateLabel(15) },
+  ], { label: 'Amount Due (USD)', value: fmtMoney(grandTotal) })}
   <table>
-    <thead><tr><th>Date</th><th>Time</th><th>Event</th><th>Location</th><th>Description</th><th>Duration</th><th>Rate</th><th>Amount</th></tr></thead>
+    <thead><tr><th>Items</th><th style="text-align:right">Quantity (hrs)</th><th style="text-align:right">Price</th><th style="text-align:right">Amount</th></tr></thead>
     <tbody>${rows}${hoursSubtotalRows}
     </tbody>
   </table>
@@ -2661,15 +2723,32 @@ function invoiceHeaderHtml(docLabel) {
 // date, etc. Shared across all document types so every invoice/statement
 // shows the same at-a-glance metadata block, matching the layout of the
 // invoices Taylor already sends via Wave.
-function invoiceMetaRowHtml(clientName, rightLines) {
+// `client` is the full client record (so contactName/address/phone/email,
+// if filled in via the ✎ Client Info button, render under Bill To — all
+// optional, purely presentational). `rightLines` is an array of
+// {label, value} pairs (Invoice #, period, dates, ...). `amountDue`, if
+// given, is a single {label, value} rendered as a highlighted callout
+// below those lines — matching the "Amount Due" box on the invoices
+// Taylor already sends via Wave.
+function invoiceMetaRowHtml(client, rightLines, amountDue) {
+  const contactLines = [client.contactName, client.address, client.phone, client.email]
+    .filter(Boolean)
+    .map(l => String(l).replace(/\n/g, '<br>'))
+    .join('<br>');
   return `
   <div class="bill-to-row">
     <div>
       <div class="field-label">Bill To</div>
-      <div class="value">${clientName}</div>
+      <div class="value">${client.name}</div>
+      ${contactLines ? `<div style="color:var(--sub);font-size:0.85rem;margin-top:4px;line-height:1.5">${contactLines}</div>` : ''}
     </div>
     <div class="right">
       ${rightLines.map(l => `<div style="margin-bottom:3px;font-size:0.88rem"><span style="color:var(--sub)">${l.label}:</span> <strong>${l.value}</strong></div>`).join('')}
+      ${amountDue ? `
+      <div class="amount-due-box">
+        <span>${amountDue.label}</span>
+        <strong>${amountDue.value}</strong>
+      </div>` : ''}
     </div>
   </div>`;
 }
@@ -2731,11 +2810,12 @@ function renderFeeInvoiceHtml(data, invoiceNum, isPreview) {
   return `<!DOCTYPE html><html><head><title>Invoice – ${client.name}</title><style>${INVOICE_STYLE}</style></head><body>
     ${previewBannerHtml(isPreview)}
     ${invoiceHeaderHtml('Invoice')}
-    ${invoiceMetaRowHtml(client.name, [
+    ${invoiceMetaRowHtml(client, [
       { label: 'Invoice #', value: invoiceNum },
       { label: 'Billing Period', value: monthLabel },
       { label: 'Invoice Date', value: dateGenerated },
-    ])}
+      { label: 'Payment Due', value: netDueDateLabel(15) },
+    ], { label: 'Amount Due (USD)', value: fmtMoney(fee) })}
     ${retainerDescription ? `
     <div class="engagement-box">
       <div class="field-label">Scope of Engagement</div>
@@ -2820,35 +2900,36 @@ function renderOverageInvoiceHtml(data, invoiceNum, isPreview) {
   const { client, entries, expenses, hours, includedHours, overageRate, overageHours, overageAmount, expensesTotal, grandTotal, monthLabel, retainerDescription } = data;
   const hasOverage = overageHours > 0;
   const dateGenerated = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-  const rows = entries.map(e => `
+  const rows = entries.map(e => {
+    const itemLine = [e.note, e.location, e.noteText].filter(Boolean).join(' — ');
+    return `
       <tr>
-        <td>${fmtDate(e.date)}</td><td>${e.time || '—'}</td><td>${e.note || '—'}</td>
-        <td>${e.location || '—'}</td><td>${e.noteText || '—'}</td><td>${fmtDur(e.minutes)}</td>
-      </tr>`).join('');
+        <td><strong>${fmtDate(e.date)}</strong>${itemLine ? `<br><span style="color:var(--sub)">${itemLine}</span>` : ''}</td>
+        <td style="text-align:right">${fmtDur(e.minutes)}</td>
+      </tr>`;
+  }).join('');
   const expenseRows = expenses.map(e => `
       <tr><td>${fmtDate(e.date)}</td><td>${e.category}</td><td>${e.description || '—'}</td><td>${fmtMoney(e.amount)}</td></tr>`).join('');
   const summaryRow = hasOverage
-    ? `<tr class="total-row">
-          <td colspan="5">Overage (${overageHours.toFixed(2)}h @ ${fmtMoney(overageRate)}/hr)</td>
-          <td>${fmtMoney(overageAmount)}</td>
-        </tr>`
-    : `<tr><td colspan="6" style="color:#555;font-style:italic">No overage this month — this is a summary of the ${hours.toFixed(1)}h of retainer work completed.</td></tr>`;
+    ? `<tr class="total-row"><td>Overage (${overageHours.toFixed(2)}h @ ${fmtMoney(overageRate)}/hr)</td><td style="text-align:right">${fmtMoney(overageAmount)}</td></tr>`
+    : `<tr><td colspan="2" style="color:var(--sub);font-style:italic">No overage this month — this is a summary of the ${hours.toFixed(1)}h of retainer work completed.</td></tr>`;
   return `<!DOCTYPE html><html><head><title>Invoice – ${client.name}</title><style>${INVOICE_STYLE}</style></head><body>
     ${previewBannerHtml(isPreview)}
     ${invoiceHeaderHtml(hasOverage ? 'Invoice' : 'Summary')}
-    ${invoiceMetaRowHtml(client.name, [
+    ${invoiceMetaRowHtml(client, [
       { label: 'Invoice #', value: invoiceNum },
       { label: 'Billing Period', value: monthLabel },
       { label: 'Hours Logged', value: `${hours.toFixed(1)}h (${includedHours}h included)` },
       { label: 'Invoice Date', value: dateGenerated },
-    ])}
+      { label: 'Payment Due', value: netDueDateLabel(15) },
+    ], { label: 'Amount Due (USD)', value: fmtMoney(grandTotal) })}
     ${retainerDescription ? `
     <div class="engagement-box">
       <div class="field-label">Scope of Engagement</div>
       <p>${retainerDescription}</p>
     </div>` : ''}
     <table>
-      <thead><tr><th>Date</th><th>Time</th><th>Event</th><th>Location</th><th>Description</th><th>Duration</th></tr></thead>
+      <thead><tr><th>Items</th><th style="text-align:right">Duration</th></tr></thead>
       <tbody>${rows}
         ${summaryRow}
       </tbody>
@@ -2968,19 +3049,22 @@ function renderStatementInvoiceHtml(data, invoiceNum, isPreview) {
   const hasOverage = overageHours > 0;
   const dateGenerated = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
 
-  const rows = entries.map(e => `
+  const rows = entries.map(e => {
+    const itemLine = [e.note, e.location, e.noteText].filter(Boolean).join(' — ');
+    return `
       <tr>
-        <td>${fmtDate(e.date)}</td><td>${e.time || '—'}</td><td>${e.note || '—'}</td>
-        <td>${e.location || '—'}</td><td>${e.noteText || '—'}</td><td>${fmtDur(e.minutes)}</td>
-      </tr>`).join('');
+        <td><strong>${fmtDate(e.date)}</strong>${itemLine ? `<br><span style="color:var(--sub)">${itemLine}</span>` : ''}</td>
+        <td style="text-align:right">${fmtDur(e.minutes)}</td>
+      </tr>`;
+  }).join('');
   const expenseRows = expenses.map(e => `
       <tr><td>${fmtDate(e.date)}</td><td>${e.category}</td><td>${e.description || '—'}</td><td>${fmtMoney(e.amount)}</td></tr>`).join('');
 
   const section1Html = includePriorMonth ? `
     <div class="stmt-section-title">Section 1 — ${priorMonthLabel} Activity Summary</div>
     <table>
-      <thead><tr><th>Date</th><th>Time</th><th>Event</th><th>Location</th><th>Description</th><th>Duration</th></tr></thead>
-      <tbody>${rows || `<tr><td colspan="6" style="color:#888;font-style:italic">No hours logged this period.</td></tr>`}</tbody>
+      <thead><tr><th>Items</th><th style="text-align:right">Duration</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="2" style="color:var(--sub);font-style:italic">No hours logged this period.</td></tr>`}</tbody>
     </table>
     <div style="margin-top:10px;font-size:0.88rem;color:#333">
       Hours used: <strong>${hours.toFixed(2)} of ${includedHours} included</strong>
@@ -3004,11 +3088,12 @@ function renderStatementInvoiceHtml(data, invoiceNum, isPreview) {
   </style></head><body>
     ${previewBannerHtml(isPreview)}
     ${invoiceHeaderHtml('Statement')}
-    ${invoiceMetaRowHtml(client.name, [
+    ${invoiceMetaRowHtml(client, [
       { label: 'Invoice #', value: invoiceNum },
       { label: 'Statement Period', value: monthLabel },
       { label: 'Statement Date', value: dateGenerated },
-    ])}
+      { label: 'Payment Due', value: netDueDateLabel(15) },
+    ], { label: 'Amount Due (USD)', value: fmtMoney(grandTotal) })}
     ${retainerDescription ? `
     <div class="engagement-box">
       <div class="field-label">Scope of Engagement</div>
