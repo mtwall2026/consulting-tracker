@@ -2642,7 +2642,7 @@ const INVOICE_STYLE = `
     .engagement-box p { margin: 0; line-height: 1.65; color: #333; font-size: 0.92rem; }
     @media print { body { padding: 20px; } }`;
 
-function invoiceHeaderHtml(clientName, invoiceNum, subtitle) {
+function invoiceHeaderHtml(clientName, invoiceNum, subtitle, docLabel) {
   return `
   <div class="invoice-header">
     <img src="https://mtwall2026.github.io/consulting-tracker/logo.png" alt="Cirrobound Solutions" />
@@ -2652,7 +2652,7 @@ function invoiceHeaderHtml(clientName, invoiceNum, subtitle) {
     </div>
   </div>
   <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:6px">
-    <h1 style="margin:0">Invoice — ${clientName}</h1>
+    <h1 style="margin:0">${docLabel || 'Invoice'} — ${clientName}</h1>
     <span style="font-size:1rem;font-weight:700;color:#333">${invoiceNum}</span>
   </div>`;
 }
@@ -2984,7 +2984,7 @@ function renderStatementInvoiceHtml(data, invoiceNum, isPreview) {
     .due-terms { color: #888; font-size: 0.8rem; margin-top: 4px; }
   </style></head><body>
     ${previewBannerHtml(isPreview)}
-    ${invoiceHeaderHtml(client.name, invoiceNum, `Monthly Retainer Statement — ${monthLabel}`)}
+    ${invoiceHeaderHtml(client.name, invoiceNum, `Monthly Retainer Statement — ${monthLabel}`, 'Statement')}
     <div class="bill-to-row">
       <div>
         <div class="field-label">Bill To</div>
@@ -3004,14 +3004,16 @@ function renderStatementInvoiceHtml(data, invoiceNum, isPreview) {
     <div class="stmt-section-title">Section 2 — ${monthLabel} Invoice</div>
     <table>
       <tbody>
-        <tr><td>Monthly Retainer Fee</td><td style="text-align:right">${fmtMoney(fee)}</td></tr>
+        <tr>
+          <td>Monthly Retainer Fee<div style="color:#888;font-size:0.78rem;font-weight:400;margin-top:2px">${planNote}</div></td>
+          <td style="text-align:right;vertical-align:top">${fmtMoney(fee)}</td>
+        </tr>
         ${includePriorMonth && hasOverage ? `<tr><td>${priorMonthLabel} Overage Charge</td><td style="text-align:right">${fmtMoney(overageAmount)}</td></tr>` : ''}
         ${includePriorMonth && expensesTotal > 0 ? `<tr><td>${priorMonthLabel} Expenses</td><td style="text-align:right">${fmtMoney(expensesTotal)}</td></tr>` : ''}
         <tr class="total-row"><td>Total Due</td><td style="text-align:right">${fmtMoney(grandTotal)}</td></tr>
       </tbody>
     </table>
     <div class="due-terms">Due: Net 15</div>
-    <div style="color:#888;font-size:0.85rem;margin-top:10px">${planNote}</div>
     ${autoPrintScript(isPreview)}
     </body></html>`;
 }
