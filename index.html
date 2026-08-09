@@ -321,8 +321,14 @@
 <!-- Client Info Modal (contact details shown under "Bill To" on invoices) -->
 <div id="clientInfoModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:999;align-items:center;justify-content:center">
   <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:28px;min-width:320px;max-width:400px;display:flex;flex-direction:column;gap:16px">
-    <h2 style="margin:0" id="clientInfoModalTitle">Client Info</h2>
+    <h2 style="margin:0" id="clientInfoModalTitle">Edit Client</h2>
     <input type="hidden" id="clientInfoClientId" />
+    <label style="display:flex;flex-direction:column;gap:6px;font-size:0.85rem;color:var(--muted)">Client Name
+      <input type="text" id="clientInfoName" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 10px;font-size:0.95rem" />
+    </label>
+    <label style="display:flex;flex-direction:column;gap:6px;font-size:0.85rem;color:var(--muted)">Hourly Rate ($)
+      <input type="number" id="clientInfoRate" min="0" step="1" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 10px;font-size:0.95rem" />
+    </label>
     <label style="display:flex;flex-direction:column;gap:6px;font-size:0.85rem;color:var(--muted)">Contact Name
       <input type="text" id="clientInfoContactName" placeholder="e.g. Keith Black" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 10px;font-size:0.95rem" />
     </label>
@@ -377,6 +383,7 @@
   <!-- Page tabs -->
   <div class="view-tabs">
     <button class="view-tab active" id="tabTimeTracking" onclick="switchView('timeTracking')">Time Tracking</button>
+    <button class="view-tab" id="tabCustomers" onclick="switchView('customers')">Customers</button>
     <button class="view-tab" id="tabRetainers" onclick="switchView('retainers')">Retainers</button>
     <button class="view-tab" id="tabExpenses" onclick="switchView('expenses')">Expenses</button>
     <button class="view-tab" id="tabInvoiceHistory" onclick="switchView('invoiceHistory')">Invoice History</button>
@@ -510,6 +517,18 @@
   </div>
 
   </div> <!-- /viewTimeTracking -->
+
+  <!-- ══════════════ Customers page ══════════════ -->
+  <div id="viewCustomers" style="display:none">
+  <div class="card">
+    <h2>Customers</h2>
+    <p style="color:var(--muted);font-size:0.85rem;margin-top:-8px">
+      Name and hourly rate are added on the Time Tracking tab. Contact info shown here appears under "Bill To" on
+      generated invoices. Retainer billing (fee, included hours, overage rate) is managed on the Retainers tab.
+    </p>
+    <div id="customersBody"></div>
+  </div>
+  </div> <!-- /viewCustomers -->
 
   <!-- ══════════════ Expenses page ══════════════ -->
   <div id="viewExpenses" style="display:none">
@@ -671,10 +690,12 @@ function switchView(view) {
   currentView = view;
   localStorage.setItem('ct_lastView', view);
   document.getElementById('viewTimeTracking').style.display = view === 'timeTracking' ? '' : 'none';
+  document.getElementById('viewCustomers').style.display = view === 'customers' ? '' : 'none';
   document.getElementById('viewExpenses').style.display = view === 'expenses' ? '' : 'none';
   document.getElementById('viewRetainers').style.display = view === 'retainers' ? '' : 'none';
   document.getElementById('viewInvoiceHistory').style.display = view === 'invoiceHistory' ? '' : 'none';
   document.getElementById('tabTimeTracking').classList.toggle('active', view === 'timeTracking');
+  document.getElementById('tabCustomers').classList.toggle('active', view === 'customers');
   document.getElementById('tabExpenses').classList.toggle('active', view === 'expenses');
   document.getElementById('tabRetainers').classList.toggle('active', view === 'retainers');
   document.getElementById('tabInvoiceHistory').classList.toggle('active', view === 'invoiceHistory');
@@ -686,6 +707,7 @@ function switchView(view) {
   // Chart.js can't size a canvas correctly while its container is
   // display:none, so redraw whichever page's charts just became visible.
   if (view === 'timeTracking') renderCharts();
+  else if (view === 'customers') renderCustomers();
   else if (view === 'expenses') renderExpenseCharts();
   else if (view === 'retainers') renderRetainersList();
   else renderInvoiceHistory();
@@ -873,7 +895,7 @@ function init() {
   // Land back on whichever tab was open before the last refresh, rather
   // than always defaulting to Time Tracking.
   const savedView = localStorage.getItem('ct_lastView');
-  if (['timeTracking', 'expenses', 'retainers', 'invoiceHistory'].includes(savedView) && savedView !== currentView) {
+  if (['timeTracking', 'customers', 'expenses', 'retainers', 'invoiceHistory'].includes(savedView) && savedView !== currentView) {
     switchView(savedView);
   }
 
@@ -884,6 +906,7 @@ function render() {
   applyTeamViewVisibility();
   backfillInvoiceHistory();
   renderClients();
+  renderCustomers();
   renderMonthFilter();
   renderLog();
   renderSummary();
@@ -951,7 +974,7 @@ function renderClients() {
     div.innerHTML = teamViewActive
       ? `<span>${c.name}</span><span class="rate">$${c.rate}/hr</span>`
       : `<span>${c.name}</span><span class="rate">$${c.rate}/hr</span>
-      <button class="del info" title="Edit contact info (shown on invoices)" onclick="openClientInfoModal('${c.id}')" style="font-size:0.8rem">&#9998;</button>
+      <button class="del info" title="Edit client (name, rate, contact info — also on the Customers tab)" onclick="openClientInfoModal('${c.id}')" style="font-size:0.8rem">&#9998;</button>
       <button class="del" title="Delete client" onclick="deleteClient('${c.id}')">×</button>`;
     if (!teamViewActive) div.addEventListener('click', e => { if (!e.target.classList.contains('del')) selectClient(c.id); });
     grid.appendChild(div);
@@ -997,6 +1020,46 @@ function renderClients() {
   // Retainer Setup's client picker always uses the real state — retainer
   // configuration is a Taylor-only billing concern, like invoicing already was.
   renderRetainerClientPicker();
+}
+
+// The Customers tab is the one place with every client's full record in
+// one table — name/rate (editable here via the same modal used elsewhere),
+// billing type, a read-only retainer summary (actual retainer config stays
+// on the Retainers tab, this is just visibility), and contact info shown
+// on invoices. Always the real state.clients — client management is a
+// Taylor-only concern, like invoicing and retainer config already are.
+function renderCustomers() {
+  const body = document.getElementById('customersBody');
+  if (!body) return;
+  if (!state.clients.length) { body.innerHTML = '<p class="empty">No clients yet — add one on the Time Tracking tab.</p>'; return; }
+
+  body.innerHTML = `
+    <table>
+      <thead><tr>
+        <th>Client</th><th>Rate</th><th>Billing</th><th>Contact</th><th>Phone</th><th>Email</th><th>Address</th><th></th>
+      </tr></thead>
+      <tbody>
+        ${state.clients.map(c => {
+          const billingBadge = c.billingType === 'retainer'
+            ? `<span class="badge" style="background:#1e2d50;color:var(--accent)">Retainer — ${fmtMoney(c.retainerAmount || 0)}/mo, ${c.retainerHours || 0}h</span>`
+            : `<span class="badge">Hourly</span>`;
+          return `
+          <tr>
+            <td><strong>${c.name}</strong></td>
+            <td>${fmtMoney(c.rate)}/hr</td>
+            <td>${billingBadge}</td>
+            <td>${c.contactName || '<span style="color:var(--muted)">—</span>'}</td>
+            <td>${c.phone || '<span style="color:var(--muted)">—</span>'}</td>
+            <td>${c.email || '<span style="color:var(--muted)">—</span>'}</td>
+            <td style="max-width:200px;white-space:pre-line;font-size:0.85rem;color:var(--muted)">${c.address || '—'}</td>
+            <td style="display:flex;gap:6px">
+              <button class="btn btn-ghost btn-sm" onclick="openClientInfoModal('${c.id}')">Edit</button>
+              <button class="btn btn-ghost btn-sm" onclick="deleteClient('${c.id}')" style="color:var(--danger)">Delete</button>
+            </td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`;
 }
 
 function addClient() {
@@ -2070,8 +2133,10 @@ function closeInvoiceModal() { document.getElementById('invoiceModal').style.dis
 function openClientInfoModal(clientId) {
   const c = state.clients.find(c => c.id === clientId);
   if (!c) return;
-  document.getElementById('clientInfoModalTitle').textContent = `Client Info — ${c.name}`;
+  document.getElementById('clientInfoModalTitle').textContent = `Edit Client — ${c.name}`;
   document.getElementById('clientInfoClientId').value = clientId;
+  document.getElementById('clientInfoName').value = c.name || '';
+  document.getElementById('clientInfoRate').value = c.rate || '';
   document.getElementById('clientInfoContactName').value = c.contactName || '';
   document.getElementById('clientInfoAddress').value = c.address || '';
   document.getElementById('clientInfoPhone').value = c.phone || '';
@@ -2083,8 +2148,13 @@ function saveClientInfo() {
   const clientId = document.getElementById('clientInfoClientId').value;
   const idx = state.clients.findIndex(c => c.id === clientId);
   if (idx === -1) return;
+  const name = document.getElementById('clientInfoName').value.trim();
+  const rate = parseFloat(document.getElementById('clientInfoRate').value) || 0;
+  if (!name) { alert('Client name cannot be blank.'); return; }
+  if (!rate || rate <= 0) { alert('Enter a valid hourly rate.'); return; }
   state.clients[idx] = {
     ...state.clients[idx],
+    name, rate,
     contactName: document.getElementById('clientInfoContactName').value.trim(),
     address: document.getElementById('clientInfoAddress').value.trim(),
     phone: document.getElementById('clientInfoPhone').value.trim(),
