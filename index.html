@@ -2699,6 +2699,22 @@ function saveRetainerDescription(clientId, value) {
   odAutoSave();
 }
 
+// Generic inline-edit setter for the Fee Breakdown fields (advisoryAmount/
+// advisoryDescription/maintenanceAmount/maintenanceDescription) — these are
+// purely presentational, itemizing the SAME single retainer fee into
+// labeled portions on the invoice. They don't change the actual billed
+// amount, the hours pool, or anything else about how the retainer works;
+// leaving them blank keeps the invoice exactly as it looks today.
+function saveRetainerField(clientId, field, value, isNumber) {
+  const idx = state.clients.findIndex(c => c.id === clientId);
+  if (idx === -1) return;
+  const newValue = isNumber ? (parseFloat(value) || 0) : value.trim();
+  if ((state.clients[idx][field] || (isNumber ? 0 : '')) === newValue) return;
+  state.clients[idx] = { ...state.clients[idx], [field]: newValue };
+  save();
+  odAutoSave();
+}
+
 function removeRetainerStatus() {
   const id = document.getElementById('retainerClientPick').value;
   const idx = state.clients.findIndex(c => c.id === id);
@@ -2898,6 +2914,45 @@ function invoiceFooterHtml() {
   </div>`;
 }
 
+// Itemizes the SAME single retainer fee into labeled portions on the
+// invoice (e.g. Advisory vs Maintenance) — purely presentational, the
+// underlying fee/hours/billing are unchanged. Each returns [] when no
+// breakdown fields are set, so callers can render exactly like before.
+function feeBreakdownItems(client) {
+  const items = [];
+  if (client.advisoryAmount > 0) items.push({ label: 'Advisory', amount: client.advisoryAmount, description: client.advisoryDescription || '' });
+  if (client.maintenanceAmount > 0) items.push({ label: 'Maintenance', amount: client.maintenanceAmount, description: client.maintenanceDescription || '' });
+  return items;
+}
+
+function feeBreakdownHtml(client) {
+  const items = feeBreakdownItems(client);
+  if (!items.length) return '';
+  return `
+    <div style="margin-top:10px;padding-top:10px;border-top:1px solid #ddd">
+      ${items.map(i => `
+      <div style="display:flex;justify-content:space-between;font-size:0.88rem;margin-bottom:4px">
+        <span>${i.label}${i.description ? ` — ${i.description}` : ''}</span>
+        <strong>${fmtMoney(i.amount)}</strong>
+      </div>`).join('')}
+    </div>`;
+}
+
+function feeBreakdownRowsHtml(client) {
+  const items = feeBreakdownItems(client);
+  return items.map(i => `
+        <tr>
+          <td style="padding-left:24px;color:#555;font-size:0.85rem">${i.label}${i.description ? `<div style="font-size:0.78rem;color:#888;font-weight:400">${i.description}</div>` : ''}</td>
+          <td style="text-align:right;color:#555;font-size:0.85rem">${fmtMoney(i.amount)}</td>
+        </tr>`).join('');
+}
+
+function feeBreakdownText(client) {
+  const items = feeBreakdownItems(client);
+  if (!items.length) return [];
+  return items.map(i => `    ${i.label}: ${fmtMoney(i.amount)}${i.description ? ` — ${i.description}` : ''}`);
+}
+
 // A preview must be unmistakable from a real invoice: a sticky banner (with
 // its own Print button, since previews skip auto-print below) instead of
 // the invoice number, so it can never be confused for something sent.
@@ -2933,7 +2988,8 @@ function renderFeeInvoiceText(data, invoiceNum) {
     'CONSULTING INVOICE — RETAINER FEE', '==================================', '',
     `Invoice #:   ${invoiceNum}`, `Bill To:     ${client.name}`, `Period:      ${monthLabel}`, `Invoice Date: ${dateGenerated}`, '',
     ...(retainerDescription ? ['SCOPE OF ENGAGEMENT', retainerDescription, ''] : []),
-    `RETAINER FEE: ${fmtMoney(fee)}`, `  ${planNote}`, '',
+    `RETAINER FEE: ${fmtMoney(fee)}`, `  ${planNote}`,
+    ...feeBreakdownText(client), '',
     `GRAND TOTAL:  ${fmtMoney(fee)}`, '', '--', 'Cirrobound Solutions',
   ].join('\n');
 }
@@ -2958,6 +3014,7 @@ function renderFeeInvoiceHtml(data, invoiceNum, isPreview) {
     <div class="fee-box">
       <div class="amount">${fmtMoney(fee)}</div>
       <div class="note">Monthly Retainer Fee — ${planNote}</div>
+      ${feeBreakdownHtml(client)}
     </div>
     <div class="grand-total">Grand Total: ${fmtMoney(fee)}</div>
     ${invoiceFooterHtml()}
@@ -3171,6 +3228,7 @@ function renderStatementInvoiceText(data, invoiceNum) {
     ...section1,
     `SECTION 2: ${monthLabel.toUpperCase()} INVOICE`, '-'.repeat(40), '',
     `Monthly Retainer Fee: ${fmtMoney(fee)}`, `  ${planNote}`,
+    ...feeBreakdownText(client),
     ...(includePriorMonth && hasOverage ? [`${priorMonthLabel} Overage Charge: ${fmtMoney(overageAmount)}`] : []),
     ...(includePriorMonth && expensesTotal > 0 ? [`${priorMonthLabel} Expenses: ${fmtMoney(expensesTotal)}`] : []),
     '', `TOTAL DUE: ${fmtMoney(grandTotal)}`, 'Due: Net 15', '', '--', 'Cirrobound Solutions',
@@ -3241,6 +3299,7 @@ function renderStatementInvoiceHtml(data, invoiceNum, isPreview) {
           <td>Monthly Retainer Fee<div style="color:#888;font-size:0.78rem;font-weight:400;margin-top:2px">${planNote}</div></td>
           <td style="text-align:right;vertical-align:top">${fmtMoney(fee)}</td>
         </tr>
+        ${feeBreakdownRowsHtml(client)}
         ${includePriorMonth && hasOverage ? `<tr><td>${priorMonthLabel} Overage Charge</td><td style="text-align:right">${fmtMoney(overageAmount)}</td></tr>` : ''}
         ${includePriorMonth && expensesTotal > 0 ? `<tr><td>${priorMonthLabel} Expenses</td><td style="text-align:right">${fmtMoney(expensesTotal)}</td></tr>` : ''}
         <tr class="total-row"><td>Total Due</td><td style="text-align:right">${fmtMoney(grandTotal)}</td></tr>
@@ -3363,6 +3422,23 @@ function renderRetainersList() {
               <div style="display:flex;gap:10px;align-items:flex-start;padding-top:2px">
                 <span style="font-size:0.72rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);white-space:nowrap;padding-top:7px">Scope of Engagement</span>
                 <textarea rows="1" placeholder="What this client's retainer covers — shown on their invoices" onblur="saveRetainerDescription('${c.id}', this.value)" style="flex:1;resize:vertical;font-family:inherit;font-size:0.85rem;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 10px;outline:none">${c.retainerDescription || ''}</textarea>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td colspan="7" style="padding-top:0">
+              <div style="display:flex;gap:10px;align-items:flex-start;padding-top:2px;flex-wrap:wrap">
+                <span style="font-size:0.72rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);white-space:nowrap;padding-top:7px;flex-basis:100%">Fee Breakdown (optional — itemizes the fee into portions on the invoice, blank = single lump-sum fee like today)</span>
+                <div style="display:flex;align-items:center;gap:6px">
+                  <span style="font-size:0.78rem;color:var(--muted);width:75px">Advisory</span>
+                  <input type="number" min="0" step="1" placeholder="$" value="${c.advisoryAmount || ''}" onblur="saveRetainerField('${c.id}', 'advisoryAmount', this.value, true)" style="width:80px;font-size:0.85rem;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px;outline:none" />
+                  <input type="text" placeholder="What this portion covers" value="${c.advisoryDescription || ''}" onblur="saveRetainerField('${c.id}', 'advisoryDescription', this.value, false)" style="width:200px;font-size:0.85rem;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px;outline:none" />
+                </div>
+                <div style="display:flex;align-items:center;gap:6px">
+                  <span style="font-size:0.78rem;color:var(--muted);width:75px">Maintenance</span>
+                  <input type="number" min="0" step="1" placeholder="$" value="${c.maintenanceAmount || ''}" onblur="saveRetainerField('${c.id}', 'maintenanceAmount', this.value, true)" style="width:80px;font-size:0.85rem;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px;outline:none" />
+                  <input type="text" placeholder="What this portion covers" value="${c.maintenanceDescription || ''}" onblur="saveRetainerField('${c.id}', 'maintenanceDescription', this.value, false)" style="width:200px;font-size:0.85rem;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px;outline:none" />
+                </div>
               </div>
             </td>
           </tr>`;
