@@ -385,6 +385,7 @@
     <button class="view-tab active" id="tabTimeTracking" onclick="switchView('timeTracking')">Time Tracking</button>
     <button class="view-tab" id="tabCustomers" onclick="switchView('customers')">Customers</button>
     <button class="view-tab" id="tabRetainers" onclick="switchView('retainers')">Retainers</button>
+    <button class="view-tab" id="tabProjects" onclick="switchView('projects')">Projects</button>
     <button class="view-tab" id="tabExpenses" onclick="switchView('expenses')">Expenses</button>
     <button class="view-tab" id="tabInvoiceHistory" onclick="switchView('invoiceHistory')">Invoice History</button>
   </div>
@@ -643,6 +644,45 @@
 
   </div> <!-- /viewRetainers -->
 
+  <!-- ══════════════ Projects page (fixed-fee, deposit + balance) ══════════════ -->
+  <div id="viewProjects" style="display:none">
+
+  <!-- New Project -->
+  <div class="card">
+    <h2>New Project</h2>
+    <div class="manual-row">
+      <label>Client
+        <select id="projectClientPick"></select>
+      </label>
+      <label>Project Name
+        <input type="text" id="projectNameInput" placeholder="e.g. P&amp;ID Extraction Skill" style="width:220px" />
+      </label>
+      <label>Total Amount ($)
+        <input type="number" id="projectTotalInput" min="0" step="1" style="width:120px" />
+      </label>
+      <label>Deposit Amount ($)
+        <input type="number" id="projectDepositInput" min="0" step="1" style="width:120px" />
+      </label>
+      <label>PO Number (opt.)
+        <input type="text" id="projectPoNumberInput" placeholder="e.g. PO-4471" style="width:140px" />
+      </label>
+      <button class="btn btn-primary" onclick="addProject()" style="align-self:flex-end">+ Add Project</button>
+    </div>
+  </div>
+
+  <!-- Projects -->
+  <div class="card">
+    <h2>Projects</h2>
+    <p style="color:var(--muted);font-size:0.85rem;margin-top:-8px">
+      Fixed-fee project billing: a deposit invoice up front and a balance invoice on completion, each tracked in
+      Invoice History like any other invoice (Sent/Paid, Reprint, Void). Upload the client's PO and your signed
+      service agreement here to keep them attached to the project.
+    </p>
+    <div id="projectsBody"></div>
+  </div>
+
+  </div> <!-- /viewProjects -->
+
   <!-- ══════════════ Invoice History page ══════════════ -->
   <div id="viewInvoiceHistory" style="display:none">
 
@@ -693,11 +733,13 @@ function switchView(view) {
   document.getElementById('viewCustomers').style.display = view === 'customers' ? '' : 'none';
   document.getElementById('viewExpenses').style.display = view === 'expenses' ? '' : 'none';
   document.getElementById('viewRetainers').style.display = view === 'retainers' ? '' : 'none';
+  document.getElementById('viewProjects').style.display = view === 'projects' ? '' : 'none';
   document.getElementById('viewInvoiceHistory').style.display = view === 'invoiceHistory' ? '' : 'none';
   document.getElementById('tabTimeTracking').classList.toggle('active', view === 'timeTracking');
   document.getElementById('tabCustomers').classList.toggle('active', view === 'customers');
   document.getElementById('tabExpenses').classList.toggle('active', view === 'expenses');
   document.getElementById('tabRetainers').classList.toggle('active', view === 'retainers');
+  document.getElementById('tabProjects').classList.toggle('active', view === 'projects');
   document.getElementById('tabInvoiceHistory').classList.toggle('active', view === 'invoiceHistory');
   // The general Print Invoice button predates the retainer Statement flow
   // and doesn't know about retainer fees/overage — only meaningful on Time
@@ -710,6 +752,7 @@ function switchView(view) {
   else if (view === 'customers') renderCustomers();
   else if (view === 'expenses') renderExpenseCharts();
   else if (view === 'retainers') renderRetainersList();
+  else if (view === 'projects') renderProjects();
   else renderInvoiceHistory();
 }
 
@@ -732,6 +775,7 @@ function load() {
 function migrateState(s) {
   if (!s.expenses) s.expenses = [];
   if (!s.invoiceHistory) s.invoiceHistory = [];
+  if (!s.projects) s.projects = [];
   return s;
 }
 function defaultState() {
@@ -740,6 +784,7 @@ function defaultState() {
     entries: [],
     expenses: [],
     invoiceHistory: [],
+    projects: [],
     nextInvoiceNum: 1001
   };
 }
@@ -895,7 +940,7 @@ function init() {
   // Land back on whichever tab was open before the last refresh, rather
   // than always defaulting to Time Tracking.
   const savedView = localStorage.getItem('ct_lastView');
-  if (['timeTracking', 'customers', 'expenses', 'retainers', 'invoiceHistory'].includes(savedView) && savedView !== currentView) {
+  if (['timeTracking', 'customers', 'expenses', 'retainers', 'projects', 'invoiceHistory'].includes(savedView) && savedView !== currentView) {
     switchView(savedView);
   }
 
@@ -915,6 +960,7 @@ function render() {
   renderExpenseLog();
   renderExpenseSummary();
   renderRetainersList();
+  renderProjects();
   renderInvoiceHistory();
   // Chart.js can't size a canvas correctly while its container is
   // display:none, so only (re)build charts for the currently visible
@@ -2178,7 +2224,7 @@ function findKeyForInvoiceNumber(num, excludeKey) {
 function describeInvoiceKey(key) {
   const rec = (state.invoiceHistory || []).find(h => h.key === key && !h.voided);
   if (!rec) return key;
-  const kindLabel = { general: 'General', fee: 'Fee', overage: 'Monthly Summary', statement: 'Retainer Statement' };
+  const kindLabel = { general: 'General', fee: 'Fee', overage: 'Monthly Summary', statement: 'Retainer Statement', project: 'Project' };
   const period = rec.month ? new Date(rec.month + '-02').toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : 'All Time';
   return `${rec.clientName} – ${kindLabel[rec.kind] || rec.kind} – ${period}`;
 }
@@ -3307,6 +3353,234 @@ function renderRetainersList() {
     </table>`;
 }
 
+// ── Projects (fixed-fee, deposit + balance) ─────────────
+function renderProjectClientPicker() {
+  const el = document.getElementById('projectClientPick');
+  if (!el) return;
+  const prev = el.value;
+  el.innerHTML = '';
+  state.clients.forEach(c => {
+    const o = document.createElement('option'); o.value = c.id; o.textContent = c.name; el.appendChild(o);
+  });
+  if (prev && state.clients.some(c => c.id === prev)) el.value = prev;
+}
+
+function addProject() {
+  const clientId = document.getElementById('projectClientPick').value;
+  const name = document.getElementById('projectNameInput').value.trim();
+  const totalAmount = parseFloat(document.getElementById('projectTotalInput').value) || 0;
+  const depositAmount = parseFloat(document.getElementById('projectDepositInput').value) || 0;
+  const poNumber = document.getElementById('projectPoNumberInput').value.trim();
+
+  if (!clientId) { alert('Select a client first.'); return; }
+  if (!name) { alert('Enter a project name.'); return; }
+  if (!totalAmount || totalAmount <= 0) { alert('Enter a valid total amount.'); return; }
+  if (depositAmount < 0 || depositAmount > totalAmount) { alert('Deposit must be between $0 and the total amount.'); return; }
+
+  state.projects.push({
+    id: uid(), clientId, name, totalAmount, depositAmount, poNumber,
+    poDocument: null, agreementDocument: null, createdAt: new Date().toISOString()
+  });
+  document.getElementById('projectNameInput').value = '';
+  document.getElementById('projectTotalInput').value = '';
+  document.getElementById('projectDepositInput').value = '';
+  document.getElementById('projectPoNumberInput').value = '';
+  save(); render(); odAutoSave();
+}
+
+function deleteProject(id) {
+  const p = state.projects.find(x => x.id === id);
+  if (!p) return;
+  if (!confirm(`Delete project "${p.name}"? This does not affect any invoices already generated for it (those stay in Invoice History) — it just removes it from this list.`)) return;
+  state.projects = state.projects.filter(x => x.id !== id);
+  save(); render(); odAutoSave();
+}
+
+// Uploads the client's PO or the signed service agreement as its own file
+// into a Projects folder in the signed-in account's OneDrive, storing just
+// a reference (name + Graph item id + view link) on the project — same
+// pattern as uploadPaymentDocument for Invoice History's payment docs.
+async function uploadProjectDocument(projectId, docType, file) {
+  if (!file) return;
+  if (!odAccount) { alert('Please sign in first.'); return; }
+  const project = state.projects.find(p => p.id === projectId);
+  if (!project) return;
+
+  const label = docType === 'po' ? 'PO' : 'Agreement';
+  const safeProjectName = project.name.replace(/[^A-Za-z0-9-]/g, '_');
+  const fileName = `${safeProjectName}-${label}-${file.name}`;
+
+  try {
+    const token = await getOdToken();
+    const res = await fetch(
+      'https://graph.microsoft.com/v1.0/me/drive/root:/Apps/Consulting Tracker/Projects/' + fileName + ':/content',
+      { method: 'PUT', headers: { Authorization: 'Bearer ' + token, 'Content-Type': file.type || 'application/octet-stream' }, body: file }
+    );
+    if (!res.ok) throw new Error(await res.text());
+    const item = await res.json();
+    const docRef = { fileName: file.name, driveItemId: item.id, webUrl: item.webUrl };
+    if (docType === 'po') project.poDocument = docRef;
+    else project.agreementDocument = docRef;
+    save();
+    odAutoSave();
+    renderProjects();
+    alert(`${label} document uploaded and linked to ${project.name}.`);
+  } catch(e) {
+    alert('Upload failed: ' + e.message);
+  }
+}
+
+function buildProjectInvoiceData(projectId, part) {
+  const project = state.projects.find(p => p.id === projectId);
+  if (!project) return null;
+  const client = state.clients.find(c => c.id === project.clientId);
+  if (!client) return null;
+  const totalAmount = project.totalAmount || 0;
+  const depositAmount = project.depositAmount || 0;
+  const balanceAmount = totalAmount - depositAmount;
+  const amount = part === 'deposit' ? depositAmount : balanceAmount;
+  const partLabel = part === 'deposit' ? 'Deposit' : 'Balance';
+  return { client, project, part, partLabel, amount, totalAmount, depositAmount, balanceAmount };
+}
+
+function renderProjectInvoiceText(data, invoiceNum) {
+  const { client, project, partLabel, amount, totalAmount, balanceAmount, part } = data;
+  const dateGenerated = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  return [
+    `CONSULTING INVOICE — PROJECT ${partLabel.toUpperCase()}`, '='.repeat(30 + partLabel.length), '',
+    `Invoice #:    ${invoiceNum}`, `Bill To:      ${client.name}`, `Project:      ${project.name}`,
+    project.poNumber ? `PO #:         ${project.poNumber}` : null,
+    `Invoice Date: ${dateGenerated}`, `Payment Due:  ${netDueDateLabel(15)}`, '',
+    `Project Total: ${fmtMoney(totalAmount)}`,
+    part === 'deposit' ? `Remaining Balance (due on completion): ${fmtMoney(balanceAmount)}` : null,
+    '',
+    `${partLabel.toUpperCase()} DUE: ${fmtMoney(amount)}`, '', '--', 'Cirrobound Solutions',
+  ].filter(l => l !== null).join('\n');
+}
+
+function renderProjectInvoiceHtml(data, invoiceNum, isPreview) {
+  const { client, project, part, partLabel, amount, totalAmount, balanceAmount } = data;
+  const dateGenerated = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  const note = part === 'deposit'
+    ? `Project Deposit — ${project.name}. Total project cost: ${fmtMoney(totalAmount)}. Remaining balance of ${fmtMoney(balanceAmount)} due on completion.`
+    : `Final Payment — ${project.name}. Project total: ${fmtMoney(totalAmount)}.`;
+  return `<!DOCTYPE html><html><head><title>Invoice – ${client.name}</title><style>${INVOICE_STYLE}</style></head><body>
+    ${previewBannerHtml(isPreview)}
+    ${invoiceHeaderHtml('Invoice')}
+    ${invoiceMetaRowHtml(client, [
+      { label: 'Invoice #', value: invoiceNum },
+      { label: 'Project', value: project.name },
+      ...(project.poNumber ? [{ label: 'PO #', value: project.poNumber }] : []),
+      { label: 'Invoice Date', value: dateGenerated },
+      { label: 'Payment Due', value: netDueDateLabel(15) },
+    ], { label: 'Amount Due (USD)', value: fmtMoney(amount) })}
+    <div class="fee-box">
+      <div class="amount">${fmtMoney(amount)}</div>
+      <div class="note">${note}</div>
+    </div>
+    <div class="grand-total">Grand Total: ${fmtMoney(amount)}</div>
+    ${invoiceFooterHtml()}
+    ${autoPrintScript(isPreview)}
+    </body></html>`;
+}
+
+function generateProjectInvoice(projectId, part, mode, invoiceNumOverride) {
+  const data = buildProjectInvoiceData(projectId, part);
+  if (!data) return;
+  const key = `project-${projectId}-${part}`;
+  const invoiceNum = getOrAssignInvoiceNumber(key, invoiceNumOverride);
+  if (!invoiceNum) return; // conflict — getOrAssignInvoiceNumber already alerted
+  if (mode === 'email') {
+    sendInvoiceMailto(`${invoiceNum} – ${data.client.name} – ${data.project.name} ${data.partLabel}`, renderProjectInvoiceText(data, invoiceNum));
+  } else {
+    openInvoiceWindow(renderProjectInvoiceHtml(data, invoiceNum, false));
+  }
+  recordInvoiceHistory({ key, kind: 'project', clientId: data.client.id, clientName: data.client.name, month: '', invoiceNum, mode, data });
+  renderProjects();
+}
+
+function generateProjectInvoiceForPart(projectId, part, mode) {
+  const project = state.projects.find(p => p.id === projectId);
+  if (!project) return;
+  const key = `project-${projectId}-${part}`;
+  if (state.invoiceNumbers && state.invoiceNumbers[key]) {
+    alert(`The ${part} invoice for this project has already been generated — use Invoice History to reprint it.`);
+    return;
+  }
+  const suggested = `INV-${state.nextInvoiceNum || 1001}`;
+  const typed = prompt(`Invoice number for this ${part === 'deposit' ? 'Deposit' : 'Balance'} invoice (edit if it needs to be out of the usual order):`, suggested);
+  if (typed === null) return; // cancelled
+  generateProjectInvoice(projectId, part, mode, typed);
+}
+
+function previewProjectInvoice(projectId, part) {
+  const data = buildProjectInvoiceData(projectId, part);
+  if (!data) return;
+  openInvoiceWindow(renderProjectInvoiceHtml(data, 'PREVIEW', true));
+}
+
+function renderProjects() {
+  const body = document.getElementById('projectsBody');
+  if (!body) return;
+  renderProjectClientPicker();
+  if (!state.projects.length) { body.innerHTML = '<p class="empty">No projects yet — add one above.</p>'; return; }
+
+  body.innerHTML = `
+    <table>
+      <thead><tr>
+        <th>Client</th><th>Project</th><th>Total</th><th>Deposit</th><th>Balance</th>
+        <th>PO</th><th>Agreement</th><th>Deposit Invoice</th><th>Balance Invoice</th><th></th>
+      </tr></thead>
+      <tbody>
+        ${state.projects.map(p => {
+          const client = state.clients.find(c => c.id === p.clientId);
+          const clientName = client ? client.name : 'Unknown client';
+          const balance = (p.totalAmount || 0) - (p.depositAmount || 0);
+          const depositDone = !!(state.invoiceNumbers && state.invoiceNumbers[`project-${p.id}-deposit`]);
+          const balanceDone = !!(state.invoiceNumbers && state.invoiceNumbers[`project-${p.id}-balance`]);
+          return `
+          <tr>
+            <td><span class="badge">${clientName}</span></td>
+            <td><strong>${p.name}</strong></td>
+            <td>${fmtMoney(p.totalAmount || 0)}</td>
+            <td>${fmtMoney(p.depositAmount || 0)}</td>
+            <td>${fmtMoney(balance)}</td>
+            <td>
+              ${p.poNumber ? `<div style="font-size:0.85rem;margin-bottom:4px">${p.poNumber}</div>` : ''}
+              ${p.poDocument
+                ? `<a href="${p.poDocument.webUrl}" target="_blank" class="btn btn-ghost btn-sm" style="text-decoration:none;color:var(--accent2)">View PO</a>`
+                : `<input type="file" id="poDoc-${p.id}" style="display:none" onchange="uploadProjectDocument('${p.id}', 'po', this.files[0])" />
+                   <button class="btn btn-ghost btn-sm" onclick="document.getElementById('poDoc-${p.id}').click()">Add PO</button>`
+              }
+            </td>
+            <td>
+              ${p.agreementDocument
+                ? `<a href="${p.agreementDocument.webUrl}" target="_blank" class="btn btn-ghost btn-sm" style="text-decoration:none;color:var(--accent2)">View Agreement</a>`
+                : `<input type="file" id="agreeDoc-${p.id}" style="display:none" onchange="uploadProjectDocument('${p.id}', 'agreement', this.files[0])" />
+                   <button class="btn btn-ghost btn-sm" onclick="document.getElementById('agreeDoc-${p.id}').click()">Add Agreement</button>`
+              }
+            </td>
+            <td>
+              <div style="margin-bottom:6px">${depositDone ? '<span style="color:var(--accent2)">Generated</span>' : '<span style="color:var(--muted)">Not sent</span>'}</div>
+              <div style="display:flex;gap:6px">
+                <button class="btn btn-ghost btn-sm" onclick="previewProjectInvoice('${p.id}', 'deposit')" style="color:var(--muted)">Preview</button>
+                <button class="btn btn-primary btn-sm" onclick="generateProjectInvoiceForPart('${p.id}', 'deposit', 'print')" ${depositDone ? 'disabled' : ''}>Generate</button>
+              </div>
+            </td>
+            <td>
+              <div style="margin-bottom:6px">${balanceDone ? '<span style="color:var(--accent2)">Generated</span>' : '<span style="color:var(--muted)">Not sent</span>'}</div>
+              <div style="display:flex;gap:6px">
+                <button class="btn btn-ghost btn-sm" onclick="previewProjectInvoice('${p.id}', 'balance')" style="color:var(--muted)">Preview</button>
+                <button class="btn btn-primary btn-sm" onclick="generateProjectInvoiceForPart('${p.id}', 'balance', 'print')" ${balanceDone ? 'disabled' : ''}>Generate</button>
+              </div>
+            </td>
+            <td><button class="btn btn-ghost btn-sm" onclick="deleteProject('${p.id}')" style="color:var(--danger)">Delete</button></td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`;
+}
+
 // ── Invoice History ──────────────────────────────────────
 
 // Renders a modern date chip: shows the formatted date (or "Set date"),
@@ -3333,6 +3607,7 @@ function dateChipHtml(historyId, isoDate, setterFn, label) {
 // invoice was generated — not the client's CURRENT billing type, which
 // could have changed since (e.g. converted to retainer afterward).
 function invoiceKindLabel(r) {
+  if (r.kind === 'project') return 'Project';
   if (r.kind === 'fee') return 'Retainer';
   if (r.kind === 'overage' || r.kind === 'statement') {
     // The Monthly Summary (and the combined Statement that replaced it)
@@ -3388,7 +3663,9 @@ function renderInvoiceHistory() {
       </tr></thead>
       <tbody>
         ${records.map(r => {
-          const periodLabel = r.month ? new Date(r.month + '-02').toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : 'All Time';
+          const periodLabel = r.kind === 'project'
+            ? `${r.snapshot.project.name} (${r.snapshot.partLabel})`
+            : r.month ? new Date(r.month + '-02').toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : 'All Time';
           const generatedLabel = r.generatedAt
             ? new Date(r.generatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
             : '<span style="color:var(--muted)">Backfilled</span>';
@@ -3453,17 +3730,19 @@ function reprintInvoice(historyId, mode) {
   const rec = (state.invoiceHistory || []).find(h => h.id === historyId);
   if (!rec || rec.voided) return;
 
-  const periodLabel = rec.month || 'Reprint';
+  const periodLabel = rec.month || (rec.kind === 'project' ? rec.snapshot.partLabel : 'Reprint');
   if (mode === 'email') {
     const text = rec.kind === 'general'   ? renderGeneralInvoiceText(rec.snapshot, rec.invoiceNum)
                : rec.kind === 'fee'       ? renderFeeInvoiceText(rec.snapshot, rec.invoiceNum)
                : rec.kind === 'statement' ? renderStatementInvoiceText(rec.snapshot, rec.invoiceNum)
+               : rec.kind === 'project'   ? renderProjectInvoiceText(rec.snapshot, rec.invoiceNum)
                :                            renderOverageInvoiceText(rec.snapshot, rec.invoiceNum);
     sendInvoiceMailto(`${rec.invoiceNum} – ${rec.clientName} – ${periodLabel} (Reprint)`, text);
   } else {
     const html = rec.kind === 'general'   ? renderGeneralInvoiceHtml(rec.snapshot, rec.invoiceNum, false)
                : rec.kind === 'fee'       ? renderFeeInvoiceHtml(rec.snapshot, rec.invoiceNum, false)
                : rec.kind === 'statement' ? renderStatementInvoiceHtml(rec.snapshot, rec.invoiceNum, false)
+               : rec.kind === 'project'   ? renderProjectInvoiceHtml(rec.snapshot, rec.invoiceNum, false)
                :                            renderOverageInvoiceHtml(rec.snapshot, rec.invoiceNum, false);
     openInvoiceWindow(html);
   }
