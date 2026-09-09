@@ -726,7 +726,25 @@ let calMonth = new Date().getMonth(); // 0-based
 
 // ── Page tabs ────────────────────────────────────────
 let currentView = 'timeTracking';
+// Customers/Retainers/Projects/Expenses/Invoice History are Taylor's
+// business-management views — never anyone else's, regardless of how a
+// switchView call gets triggered (tab click, restored ct_lastView on
+// reload, or a direct call). This is the one authoritative gate; hiding
+// the tab buttons in updateSyncUI() is just the visible follow-through.
+//
+// Gate on `odAccount &&` — MSAL only sets odAccount after the window
+// 'load' event fires, but init() (which restores the last-used tab) runs
+// synchronously before that, so odAccount is still null at that point
+// for EVERY user, Taylor included. Enforcing this whenever isManager()
+// is merely false (rather than affirmatively non-manager) would wrongly
+// downgrade Taylor's own restored tab on every reload, before sign-in
+// even finishes resolving. The whole .app is hidden behind the sign-in
+// gate during that window anyway, so there's nothing to protect yet;
+// updateSyncUI() re-checks and redirects non-managers once odAccount
+// is actually known.
+const MANAGER_ONLY_VIEWS = ['customers', 'retainers', 'projects', 'expenses', 'invoiceHistory'];
 function switchView(view) {
+  if (odAccount && MANAGER_ONLY_VIEWS.includes(view) && !isManager()) view = 'timeTracking';
   currentView = view;
   localStorage.setItem('ct_lastView', view);
   document.getElementById('viewTimeTracking').style.display = view === 'timeTracking' ? '' : 'none';
@@ -3968,6 +3986,14 @@ function updateSyncUI() {
     if (app)  app.style.display  = 'flex';
     if (teamCard) teamCard.style.display = isManager() ? '' : 'none';
     if (shareBtn) shareBtn.style.display = isManager() ? 'none' : '';
+    // Customers/Retainers/Projects/Expenses/Invoice History are Taylor's
+    // business-management views (billing, invoicing, client records) —
+    // teammates only ever need Time Tracking to log their own hours.
+    ['tabCustomers', 'tabRetainers', 'tabProjects', 'tabExpenses', 'tabInvoiceHistory'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = isManager() ? '' : 'none';
+    });
+    if (!isManager() && currentView !== 'timeTracking') switchView('timeTracking');
   } else {
     if (btnSign) btnSign.textContent = 'Sign in with Microsoft';
     if (btnLoad) btnLoad.disabled = true;
