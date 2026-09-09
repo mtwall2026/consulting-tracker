@@ -3519,6 +3519,32 @@ function previewProjectInvoice(projectId, part) {
   openInvoiceWindow(renderProjectInvoiceHtml(data, 'PREVIEW', true));
 }
 
+// Deposit/Balance cell: before generation, Preview + Generate (same as
+// before). Once generated, shows the invoice #, a Paid/Unpaid pill wired
+// to the SAME togglePaid() Invoice History uses (so toggling from either
+// tab stays in sync), and a Reprint button — so checking payment status
+// or re-sending the document never requires a trip to Invoice History.
+function projectInvoicePartCellHtml(project, part) {
+  const key = `project-${project.id}-${part}`;
+  const rec = (state.invoiceHistory || []).find(h => h.key === key && !h.voided);
+  if (!rec) {
+    return `
+      <div style="margin-bottom:6px"><span style="color:var(--muted)">Not sent</span></div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" onclick="previewProjectInvoice('${project.id}', '${part}')" style="color:var(--muted)">Preview</button>
+        <button class="btn btn-primary btn-sm" onclick="generateProjectInvoiceForPart('${project.id}', '${part}', 'print')">Generate</button>
+      </div>`;
+  }
+  return `
+    <div style="margin-bottom:6px;font-size:0.85rem;color:var(--muted)">${rec.invoiceNum}</div>
+    <button class="status-pill ${rec.paid ? 'active' : ''}" onclick="togglePaid('${rec.id}')" title="Click to toggle" style="margin-bottom:6px">
+      <span class="dot"></span>${rec.paid ? 'Paid' : 'Unpaid'}
+    </button>
+    <div style="display:flex;gap:6px">
+      <button class="btn btn-ghost btn-sm" onclick="reprintInvoice('${rec.id}', 'print')" style="color:var(--accent)">Reprint</button>
+    </div>`;
+}
+
 function renderProjects() {
   const body = document.getElementById('projectsBody');
   if (!body) return;
@@ -3536,8 +3562,6 @@ function renderProjects() {
           const client = state.clients.find(c => c.id === p.clientId);
           const clientName = client ? client.name : 'Unknown client';
           const balance = (p.totalAmount || 0) - (p.depositAmount || 0);
-          const depositDone = !!(state.invoiceNumbers && state.invoiceNumbers[`project-${p.id}-deposit`]);
-          const balanceDone = !!(state.invoiceNumbers && state.invoiceNumbers[`project-${p.id}-balance`]);
           return `
           <tr>
             <td><span class="badge">${clientName}</span></td>
@@ -3560,20 +3584,8 @@ function renderProjects() {
                    <button class="btn btn-ghost btn-sm" onclick="document.getElementById('agreeDoc-${p.id}').click()">Add Agreement</button>`
               }
             </td>
-            <td>
-              <div style="margin-bottom:6px">${depositDone ? '<span style="color:var(--accent2)">Generated</span>' : '<span style="color:var(--muted)">Not sent</span>'}</div>
-              <div style="display:flex;gap:6px">
-                <button class="btn btn-ghost btn-sm" onclick="previewProjectInvoice('${p.id}', 'deposit')" style="color:var(--muted)">Preview</button>
-                <button class="btn btn-primary btn-sm" onclick="generateProjectInvoiceForPart('${p.id}', 'deposit', 'print')" ${depositDone ? 'disabled' : ''}>Generate</button>
-              </div>
-            </td>
-            <td>
-              <div style="margin-bottom:6px">${balanceDone ? '<span style="color:var(--accent2)">Generated</span>' : '<span style="color:var(--muted)">Not sent</span>'}</div>
-              <div style="display:flex;gap:6px">
-                <button class="btn btn-ghost btn-sm" onclick="previewProjectInvoice('${p.id}', 'balance')" style="color:var(--muted)">Preview</button>
-                <button class="btn btn-primary btn-sm" onclick="generateProjectInvoiceForPart('${p.id}', 'balance', 'print')" ${balanceDone ? 'disabled' : ''}>Generate</button>
-              </div>
-            </td>
+            <td>${projectInvoicePartCellHtml(p, 'deposit')}</td>
+            <td>${projectInvoicePartCellHtml(p, 'balance')}</td>
             <td><button class="btn btn-ghost btn-sm" onclick="deleteProject('${p.id}')" style="color:var(--danger)">Delete</button></td>
           </tr>`;
         }).join('')}
@@ -3821,6 +3833,7 @@ function togglePaid(historyId) {
   save();
   odAutoSave();
   renderInvoiceHistory();
+  if (rec.kind === 'project') renderProjects(); // Paid status also shown on the Projects tab
 }
 
 function toggleSent(historyId) {
@@ -3850,6 +3863,7 @@ function setPaidDate(historyId, dateStr) {
   save();
   odAutoSave();
   renderInvoiceHistory();
+  if (rec.kind === 'project') renderProjects();
 }
 
 // Mirrors setPaidDate() for the Sent date chip.
