@@ -405,7 +405,6 @@
     <div class="export-row">
       <button class="btn btn-ghost btn-sm" id="btnExportCSV" onclick="exportCSV()">Export CSV</button>
       <button class="btn btn-ghost btn-sm" id="btnImportCSVBtn" onclick="document.getElementById('importCSVFile').click()">Import CSV</button>
-      <button class="btn btn-ghost btn-sm" id="btnClearData" onclick="clearAllData()" style="color:var(--danger)">Clear Data</button>
       <input type="file" id="importCSVFile" accept=".csv" style="display:none" onchange="importCSV(event)" />
       <button class="btn btn-ghost btn-sm" id="btnPrintInvoice" onclick="printInvoice()">Print Invoice</button>
       <button class="btn btn-ghost btn-sm" id="btnShareWithManager" onclick="shareMyDataWithManager()" style="display:none">Share log with Taylor</button>
@@ -853,17 +852,6 @@ function save() {
     if (odAccount && odAccount.username) localStorage.setItem('ct_last_account', odAccount.username);
   } catch(e) { console.error('Save failed:', e); }
 }
-function clearAllData() {
-  const input = prompt('Type DELETE to confirm clearing all data. This cannot be undone.');
-  if (input !== 'DELETE') { if (input !== null) alert('Cancelled — you must type DELETE exactly.'); return; }
-  localStorage.removeItem('ct_state');
-  localStorage.removeItem('ct_state_backup');
-  state = defaultState();
-  save();
-  render();
-  odAutoSave();
-  alert('All data cleared. You can now Import CSV to restore your entries.');
-}
 function loadBackup() {
   try {
     const b = localStorage.getItem('ct_state_backup');
@@ -1035,7 +1023,7 @@ function applyTeamViewVisibility() {
     const el = document.getElementById(id);
     if (el) el.style.display = teamViewActive ? 'none' : '';
   });
-  ['btnImportCSVBtn', 'btnClearData', 'btnPrintInvoice', 'btnImportExpensesCSVBtn'].forEach(id => {
+  ['btnImportCSVBtn', 'btnPrintInvoice', 'btnImportExpensesCSVBtn'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.disabled = teamViewActive;
   });
