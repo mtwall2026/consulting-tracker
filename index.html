@@ -348,6 +348,42 @@
   </div>
 </div>
 
+<!-- Edit Project Modal -->
+<div id="projectEditModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:999;align-items:center;justify-content:center">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:28px;min-width:320px;max-width:420px;display:flex;flex-direction:column;gap:16px">
+    <h2 style="margin:0" id="projectEditModalTitle">Edit Project</h2>
+    <input type="hidden" id="projectEditId" />
+    <label style="display:flex;flex-direction:column;gap:6px;font-size:0.85rem;color:var(--muted)">Project Name
+      <input type="text" id="projectEditName" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 10px;font-size:0.95rem" />
+    </label>
+    <div style="display:flex;gap:10px">
+      <label style="display:flex;flex-direction:column;gap:6px;font-size:0.85rem;color:var(--muted);flex:1">Total Amount ($)
+        <input type="number" id="projectEditTotal" min="0" step="1" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 10px;font-size:0.95rem" />
+      </label>
+      <label style="display:flex;flex-direction:column;gap:6px;font-size:0.85rem;color:var(--muted);flex:1">Deposit Amount ($)
+        <input type="number" id="projectEditDeposit" min="0" step="1" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 10px;font-size:0.95rem" />
+      </label>
+    </div>
+    <label style="display:flex;flex-direction:column;gap:6px;font-size:0.85rem;color:var(--muted)">PO Number (opt.)
+      <input type="text" id="projectEditPoNumber" placeholder="e.g. PO-4471" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 10px;font-size:0.95rem" />
+    </label>
+    <div style="display:flex;flex-direction:column;gap:6px;font-size:0.85rem;color:var(--muted)">
+      PO Document
+      <div id="projectEditPoCurrent" style="font-size:0.85rem;color:var(--text)"></div>
+      <input type="file" id="projectEditPoFile" style="font-size:0.85rem" />
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px;font-size:0.85rem;color:var(--muted)">
+      Service Agreement
+      <div id="projectEditAgreementCurrent" style="font-size:0.85rem;color:var(--text)"></div>
+      <input type="file" id="projectEditAgreementFile" style="font-size:0.85rem" />
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeProjectEditModal()">Cancel</button>
+      <button class="btn btn-primary" id="projectEditSaveBtn" onclick="saveProjectEdit()">Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- Sign-in Gate -->
 <div id="signInGate" style="display:none;position:fixed;inset:0;background:var(--bg);z-index:9999;flex-direction:column;align-items:center;justify-content:center;gap:24px">
   <img src="logo.png" alt="Cirrobound Solutions" style="height:80px;width:auto;margin-bottom:8px" />
@@ -3490,29 +3526,94 @@ function deleteProject(id) {
   save(); render(); odAutoSave();
 }
 
+// Edits a project's name/total/deposit/PO number, and optionally replaces
+// its PO document and/or service agreement — doesn't touch invoices
+// already generated (those keep whatever the project looked like at the
+// time, via their own frozen snapshot), so editing a project after its
+// deposit invoice went out never retroactively changes that invoice.
+function openProjectEditModal(projectId) {
+  const p = state.projects.find(x => x.id === projectId);
+  if (!p) return;
+  document.getElementById('projectEditModalTitle').textContent = `Edit Project — ${p.name}`;
+  document.getElementById('projectEditId').value = projectId;
+  document.getElementById('projectEditName').value = p.name;
+  document.getElementById('projectEditTotal').value = p.totalAmount || '';
+  document.getElementById('projectEditDeposit').value = p.depositAmount || '';
+  document.getElementById('projectEditPoNumber').value = p.poNumber || '';
+  document.getElementById('projectEditPoCurrent').textContent = p.poDocument ? `Current: ${p.poDocument.fileName} (choose a file below to replace)` : 'No PO document uploaded yet.';
+  document.getElementById('projectEditAgreementCurrent').textContent = p.agreementDocument ? `Current: ${p.agreementDocument.fileName} (choose a file below to replace)` : 'No service agreement uploaded yet.';
+  document.getElementById('projectEditPoFile').value = '';
+  document.getElementById('projectEditAgreementFile').value = '';
+  document.getElementById('projectEditModal').style.display = 'flex';
+}
+function closeProjectEditModal() { document.getElementById('projectEditModal').style.display = 'none'; }
+
+async function saveProjectEdit() {
+  const projectId = document.getElementById('projectEditId').value;
+  const p = state.projects.find(x => x.id === projectId);
+  if (!p) return;
+
+  const name = document.getElementById('projectEditName').value.trim();
+  const totalAmount = parseFloat(document.getElementById('projectEditTotal').value) || 0;
+  const depositAmount = parseFloat(document.getElementById('projectEditDeposit').value) || 0;
+  const poNumber = document.getElementById('projectEditPoNumber').value.trim();
+  if (!name) { alert('Enter a project name.'); return; }
+  if (!totalAmount || totalAmount <= 0) { alert('Enter a valid total amount.'); return; }
+  if (depositAmount < 0 || depositAmount > totalAmount) { alert('Deposit must be between $0 and the total amount.'); return; }
+
+  const poFile = document.getElementById('projectEditPoFile').files[0];
+  const agreementFile = document.getElementById('projectEditAgreementFile').files[0];
+  if ((poFile || agreementFile) && !odAccount) { alert('Please sign in first to replace a document.'); return; }
+
+  const saveBtn = document.getElementById('projectEditSaveBtn');
+  saveBtn.disabled = true;
+  saveBtn.textContent = 'Saving…';
+  try {
+    p.name = name; p.totalAmount = totalAmount; p.depositAmount = depositAmount; p.poNumber = poNumber;
+    if (poFile) p.poDocument = await uploadProjectDocFile(p, 'po', poFile);
+    if (agreementFile) p.agreementDocument = await uploadProjectDocFile(p, 'agreement', agreementFile);
+    save();
+    odAutoSave();
+    render();
+    closeProjectEditModal();
+  } catch(e) {
+    alert('Save failed: ' + e.message);
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.textContent = 'Save';
+  }
+}
+
 // Uploads the client's PO or the signed service agreement as its own file
 // into a Projects folder in the signed-in account's OneDrive, storing just
 // a reference (name + Graph item id + view link) on the project — same
 // pattern as uploadPaymentDocument for Invoice History's payment docs.
+// Does the actual OneDrive upload and returns a {fileName, driveItemId,
+// webUrl} doc reference — shared by the inline Add PO/Agreement buttons
+// (uploadProjectDocument) and the Edit Project modal's file replacement
+// (saveProjectEdit), so both go through one upload path.
+async function uploadProjectDocFile(project, docType, file) {
+  const label = docType === 'po' ? 'PO' : 'Agreement';
+  const safeProjectName = project.name.replace(/[^A-Za-z0-9-]/g, '_');
+  const fileName = `${safeProjectName}-${label}-${file.name}`;
+  const token = await getOdToken();
+  const res = await fetch(
+    'https://graph.microsoft.com/v1.0/me/drive/root:/Apps/Consulting Tracker/Projects/' + fileName + ':/content',
+    { method: 'PUT', headers: { Authorization: 'Bearer ' + token, 'Content-Type': file.type || 'application/octet-stream' }, body: file }
+  );
+  if (!res.ok) throw new Error(await res.text());
+  const item = await res.json();
+  return { fileName: file.name, driveItemId: item.id, webUrl: item.webUrl };
+}
+
 async function uploadProjectDocument(projectId, docType, file) {
   if (!file) return;
   if (!odAccount) { alert('Please sign in first.'); return; }
   const project = state.projects.find(p => p.id === projectId);
   if (!project) return;
-
   const label = docType === 'po' ? 'PO' : 'Agreement';
-  const safeProjectName = project.name.replace(/[^A-Za-z0-9-]/g, '_');
-  const fileName = `${safeProjectName}-${label}-${file.name}`;
-
   try {
-    const token = await getOdToken();
-    const res = await fetch(
-      'https://graph.microsoft.com/v1.0/me/drive/root:/Apps/Consulting Tracker/Projects/' + fileName + ':/content',
-      { method: 'PUT', headers: { Authorization: 'Bearer ' + token, 'Content-Type': file.type || 'application/octet-stream' }, body: file }
-    );
-    if (!res.ok) throw new Error(await res.text());
-    const item = await res.json();
-    const docRef = { fileName: file.name, driveItemId: item.id, webUrl: item.webUrl };
+    const docRef = await uploadProjectDocFile(project, docType, file);
     if (docType === 'po') project.poDocument = docRef;
     else project.agreementDocument = docRef;
     save();
@@ -3680,7 +3781,10 @@ function renderProjects() {
             </td>
             <td>${projectInvoicePartCellHtml(p, 'deposit')}</td>
             <td>${projectInvoicePartCellHtml(p, 'balance')}</td>
-            <td><button class="btn btn-ghost btn-sm" onclick="deleteProject('${p.id}')" style="color:var(--danger)">Delete</button></td>
+            <td style="display:flex;gap:6px">
+              <button class="btn btn-ghost btn-sm" onclick="openProjectEditModal('${p.id}')">Edit</button>
+              <button class="btn btn-ghost btn-sm" onclick="deleteProject('${p.id}')" style="color:var(--danger)">Delete</button>
+            </td>
           </tr>`;
         }).join('')}
       </tbody>
