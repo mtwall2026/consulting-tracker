@@ -896,7 +896,9 @@ function roundTimerElapsed(ms) {
   return Math.max(1, Math.round(ms / 60000));
 }
 function calcAmount(minutes, rate) { return (minutes / 60) * rate; }
-function fmtMoney(n) { return '$' + n.toFixed(2); }
+function fmtMoney(n) {
+  return '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 // "Payment Due" date shown on invoices — Net 15 from today (the invoice's
 // generation date), matching the "Payment Due" line on invoices already
 // sent via Wave.
