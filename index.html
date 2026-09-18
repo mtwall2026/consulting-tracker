@@ -361,7 +361,7 @@
         <input type="number" id="projectEditTotal" min="0" step="1" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 10px;font-size:0.95rem" />
       </label>
       <label style="display:flex;flex-direction:column;gap:6px;font-size:0.85rem;color:var(--muted);flex:1">Deposit Amount ($)
-        <input type="number" id="projectEditDeposit" min="0" step="1" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 10px;font-size:0.95rem" />
+        <input type="number" id="projectEditDeposit" min="0" step="1" placeholder="0 = flat fee" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 10px;font-size:0.95rem" />
       </label>
     </div>
     <label style="display:flex;flex-direction:column;gap:6px;font-size:0.85rem;color:var(--muted)">PO Number (opt.)
@@ -696,7 +696,7 @@
         <input type="number" id="projectTotalInput" min="0" step="1" style="width:120px" />
       </label>
       <label>Deposit Amount ($)
-        <input type="number" id="projectDepositInput" min="0" step="1" style="width:120px" />
+        <input type="number" id="projectDepositInput" min="0" step="1" placeholder="0 = flat fee" style="width:120px" />
       </label>
       <label>PO Number (opt.)
         <input type="text" id="projectPoNumberInput" placeholder="e.g. PO-4471" style="width:140px" />
@@ -711,7 +711,8 @@
     <p style="color:var(--muted);font-size:0.85rem;margin-top:-8px">
       Fixed-fee project billing: a deposit invoice up front and a balance invoice on completion, each tracked in
       Invoice History like any other invoice (Sent/Paid, Reprint, Void). Upload the client's PO and your signed
-      service agreement here to keep them attached to the project.
+      service agreement here to keep them attached to the project. For a one-time flat-fee job (training,
+      workshop), set the deposit to $0 — it then gets a single invoice for the full amount.
     </p>
     <div id="projectsBody"></div>
   </div>
@@ -884,6 +885,38 @@ function roundTimerElapsed(ms) {
   return Math.max(1, Math.round(ms / 60000));
 }
 function calcAmount(minutes, rate) { return (minutes / 60) * rate; }
+
+// Local-time date/month keys. Never use toISOString() for these: it returns
+// UTC, so anywhere behind UTC (Eastern is -4/-5) every evening after ~8pm
+// rolls to the NEXT day. That silently filed stopped-timer entries under
+// tomorrow's date — and on the last evening of a month, under the next
+// MONTH, which moved those hours onto the wrong retainer statement and out
+// of the right month's overage math. Every "what day/month is it here"
+// value goes through these two.
+function localDateStr(d) {
+  const dt = d || new Date();
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+}
+function localMonthStr(d) {
+  const dt = d || new Date();
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
+}
+// Timestamp for paidAt/sentAt. These are only ever shown as a DATE (the
+// date chips slice off the first 10 chars), so storing the raw instant
+// made an evening click display as tomorrow. Noon UTC of the local date
+// slices back to that same date from UTC-11 through UTC+11 — the same
+// convention setPaidDate already uses when you pick a date by hand.
+// Escapes user text placed inside HTML — required for editable fields'
+// value="..." / <textarea> content: an unescaped quote truncates the shown
+// value, and since those fields save on blur, clicking in and out would
+// save the truncated text over the real text.
+function escHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+function localTodayStamp() { return localDateStr() + 'T12:00:00.000Z'; }
+
 function fmtMoney(n) {
   return '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -971,9 +1004,9 @@ function init() {
 
   // Default date + time = now
   const now = new Date();
-  document.getElementById('manualDate').value = now.toISOString().slice(0, 10);
+  document.getElementById('manualDate').value = localDateStr(now);
   document.getElementById('manualTime').value = now.toTimeString().slice(0, 5);
-  document.getElementById('expenseDate').value = now.toISOString().slice(0, 10);
+  document.getElementById('expenseDate').value = localDateStr(now);
 
   // Month filter starts on All
   document.getElementById('filterMonth').value = '';
@@ -1269,7 +1302,7 @@ function stopTimer() {
     return;
   }
   const now = new Date();
-  logEntry(timerClientId, now.toISOString().slice(0,10), now.toTimeString().slice(0,5), minutes, note || '');
+  logEntry(timerClientId, localDateStr(now), now.toTimeString().slice(0,5), minutes, note || '');
   resetTimerUI();
 }
 
@@ -1289,7 +1322,7 @@ function resetTimerUI() {
 
 function fillNow() {
   const now = new Date();
-  document.getElementById('manualDate').value = now.toISOString().slice(0, 10);
+  document.getElementById('manualDate').value = localDateStr(now);
   document.getElementById('manualTime').value = now.toTimeString().slice(0, 5);
 }
 
@@ -1349,7 +1382,7 @@ function editEntry(id) {
       <option value="Remote" ${e.location==='Remote'?'selected':''}>Remote</option>
       <option value="Onsite" ${e.location==='Onsite'?'selected':''}>Onsite</option>
     </select></td>
-    <td><input type="text" value="${e.noteText||''}" id="ed-notetext" placeholder="Description" style="${s};width:130px"></td>
+    <td><input type="text" value="${escHtml(e.noteText)}" id="ed-notetext" placeholder="Description" style="${s};width:130px"></td>
     <td><select id="ed-dur" style="${s}">${durOptions}</select></td>
     <td colspan="2"></td>
     <td style="display:flex;gap:6px;padding:6px 10px">
@@ -1361,15 +1394,24 @@ function editEntry(id) {
 function saveEntry(id) {
   const idx = state.entries.findIndex(e => e.id === id);
   if (idx === -1) return;
+  const existing = state.entries[idx];
   const clientId = document.getElementById('ed-client').value;
   const client = state.clients.find(c => c.id === clientId);
+  // An entry's `rate` is the rate it was BILLED at, frozen when logged —
+  // not a live lookup of the client's current rate. Re-reading the client
+  // here meant editing anything (even just a typo in the description) on
+  // an old entry silently re-priced it at today's rate, with no rate field
+  // in the edit form to notice or stop it. Only adopt the client's current
+  // rate when the entry is actually being moved to a DIFFERENT client,
+  // where keeping the old client's rate would make no sense.
+  const clientChanged = clientId !== existing.clientId;
   state.entries[idx] = {
-    ...state.entries[idx],
+    ...existing,
     date: document.getElementById('ed-date').value,
     time: document.getElementById('ed-time').value,
     clientId,
-    clientName: client ? client.name : state.entries[idx].clientName,
-    rate: client ? client.rate : state.entries[idx].rate,
+    clientName: client ? client.name : existing.clientName,
+    rate: clientChanged && client ? client.rate : existing.rate,
     minutes: parseInt(document.getElementById('ed-dur').value),
     note: document.getElementById('ed-note').value,
     location: document.getElementById('ed-location').value,
@@ -1649,7 +1691,7 @@ function getLast6Months() {
   const now = new Date();
   for (let i = 5; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    months.push(d.toISOString().slice(0, 7)); // "YYYY-MM"
+    months.push(localMonthStr(d)); // "YYYY-MM"
   }
   return months;
 }
@@ -1664,7 +1706,7 @@ function renderCharts() {
     last6 = [];
     for (let i = 5; i >= 0; i--) {
       const d = new Date(fy, fm - 1 - i, 1);
-      last6.push(d.toISOString().slice(0, 7));
+      last6.push(localMonthStr(d));
     }
   } else {
     last6 = getLast6Months();
@@ -1826,7 +1868,7 @@ function renderExpenseCharts() {
     last6 = [];
     for (let i = 5; i >= 0; i--) {
       const d = new Date(fy, fm - 1 - i, 1);
-      last6.push(d.toISOString().slice(0, 7));
+      last6.push(localMonthStr(d));
     }
   } else {
     last6 = getLast6Months();
@@ -1983,7 +2025,7 @@ function renderCalendar() {
     .toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   title.textContent = monthLabel;
 
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = localDateStr();
   const ym = `${calYear}-${String(calMonth + 1).padStart(2, '0')}`;
 
   // Build a map: date string -> { totalMin, totalAmt }
@@ -2097,7 +2139,8 @@ function importCSV(event) {
       const location   = locationIdx > -1 ? clean[locationIdx] : '';
       const noteText   = noteTextIdx > -1 ? clean[noteTextIdx] : '';
       const minutes    = parseInt(clean[durIdx]);
-      const rate       = rateIdx > -1 ? parseInt(clean[rateIdx]) : 200;
+      const csvRate    = rateIdx > -1 ? parseFloat(clean[rateIdx]) : NaN;
+      const rate       = isNaN(csvRate) ? 200 : csvRate;
 
       if (!date || !clientName || isNaN(minutes)) { skipped++; continue; }
 
@@ -2112,7 +2155,11 @@ function importCSV(event) {
       const duplicate = state.entries.some(ex => ex.date === date && ex.clientId === client.id && ex.minutes === minutes && ex.note === note);
       if (duplicate) { skipped++; continue; }
 
-      state.entries.unshift({ id: uid(), clientId: client.id, clientName: client.name, rate: client.rate, date, time, minutes, note, location, noteText });
+      // Keep the rate the CSV says the entry was billed at (same rule as
+      // saveEntry: an entry's rate is frozen at billing time). Only fall back
+      // to the client's current rate if the CSV has no usable Rate column.
+      const entryRate = isNaN(csvRate) ? client.rate : csvRate;
+      state.entries.unshift({ id: uid(), clientId: client.id, clientName: client.name, rate: entryRate, date, time, minutes, note, location, noteText });
       imported++;
     }
 
@@ -2201,7 +2248,7 @@ function printInvoice() {
   state.clients.forEach(c => {
     const o = document.createElement('option'); o.value = c.id; o.textContent = `${c.name} ($${c.rate}/hr)`; pick.appendChild(o);
   });
-  document.getElementById('invoiceMonthPick').value = new Date().toISOString().slice(0, 7);
+  document.getElementById('invoiceMonthPick').value = localMonthStr();
   modal.style.display = 'flex';
   updateInvoicePreview();
 }
@@ -2212,10 +2259,27 @@ function updateInvoicePreview() {
   if (!state.invoiceNumbers) state.invoiceNumbers = {};
   if (!state.nextInvoiceNum) state.nextInvoiceNum = 1001;
   const key = `${clientId}-${month || 'all'}`;
-  const num = state.invoiceNumbers[key] || `INV-${state.nextInvoiceNum}`;
-  document.getElementById('invoiceNumInput').value = num;
+  const num = state.invoiceNumbers[key] || nextFreeInvoiceNum();
+  const input = document.getElementById('invoiceNumInput');
+  input.value = num;
+  // Remember what we pre-filled, so confirmInvoice can tell an untouched
+  // suggestion apart from a number Taylor actually typed. Without this the
+  // suggestion always looked like a manual override, which made
+  // re-generating an older invoice drag nextInvoiceNum backwards.
+  input.dataset.suggested = num;
 }
 function closeInvoiceModal() { document.getElementById('invoiceModal').style.display = 'none'; }
+
+// The Invoice # box is pre-filled with a suggestion, so its value alone
+// can't tell us whether Taylor actually chose that number. Returns the
+// value only when it differs from what was pre-filled (a real override),
+// otherwise null so getOrAssignInvoiceNumber takes its normal path.
+function typedInvoiceOverride() {
+  const input = document.getElementById('invoiceNumInput');
+  const value = (input.value || '').trim();
+  if (!value) return null;
+  return value === (input.dataset.suggested || '') ? null : value;
+}
 
 // Contact info (name/address/phone/email) shown under "Bill To" on
 // generated invoices/statements — optional, purely presentational, has no
@@ -2258,6 +2322,23 @@ function saveClientInfo() {
 // active mappings — voidInvoiceHistory() deletes a key's entry the moment
 // it's voided — so any match here is a genuine live conflict, not a freed
 // number being reused.
+// The next auto-suggested invoice number, skipping any number already in
+// use (live in invoiceNumbers, or retired by a Void). Normally that's just
+// INV-<nextInvoiceNum>. It only jumps ahead when the counter has fallen
+// behind numbers already issued — which also quietly repairs a counter an
+// earlier bug dragged backwards. A manually typed lower number still becomes
+// the baseline, as long as the numbers after it are actually free.
+function nextFreeInvoiceNum() {
+  if (!state.nextInvoiceNum) state.nextInvoiceNum = 1001;
+  const used = new Set([
+    ...Object.values(state.invoiceNumbers || {}),
+    ...(state.invoiceHistory || []).map(h => h.invoiceNum)
+  ]);
+  let n = state.nextInvoiceNum;
+  while (used.has(`INV-${n}`)) n++;
+  return `INV-${n}`;
+}
+
 function findKeyForInvoiceNumber(num, excludeKey) {
   if (!state.invoiceNumbers) return null;
   return Object.keys(state.invoiceNumbers).find(k => k !== excludeKey && state.invoiceNumbers[k] === num) || null;
@@ -2294,7 +2375,7 @@ function getOrAssignInvoiceNumber(key, overrideNum) {
   if (!state.nextInvoiceNum) state.nextInvoiceNum = 1001;
   if (!state.invoiceNumbers) state.invoiceNumbers = {};
   const typed = overrideNum && overrideNum.trim();
-  const finalNum = typed || state.invoiceNumbers[key] || `INV-${state.nextInvoiceNum}`;
+  const finalNum = typed || state.invoiceNumbers[key] || nextFreeInvoiceNum();
 
   if (typed) {
     const conflictKey = findKeyForInvoiceNumber(finalNum, key);
@@ -2631,7 +2712,7 @@ function previewGeneralInvoice(explicitClientId, explicitMonth) {
 function previewFeeInvoice(clientId, month) {
   const client = state.clients.find(c => c.id === clientId);
   if (!client) return;
-  const data = buildFeeInvoiceData(clientId, month || new Date().toISOString().slice(0, 7));
+  const data = buildFeeInvoiceData(clientId, month || localMonthStr());
   if (!data) return;
   openInvoiceWindow(renderFeeInvoiceHtml(data, 'PREVIEW', true));
 }
@@ -2639,7 +2720,7 @@ function previewFeeInvoice(clientId, month) {
 function previewOverageInvoice(clientId, month) {
   const client = state.clients.find(c => c.id === clientId);
   if (!client) return;
-  const data = buildOverageInvoiceData(clientId, month || new Date().toISOString().slice(0, 7));
+  const data = buildOverageInvoiceData(clientId, month || localMonthStr());
   if (!data) return;
   openInvoiceWindow(renderOverageInvoiceHtml(data, 'PREVIEW', true));
 }
@@ -2647,7 +2728,10 @@ function previewOverageInvoice(clientId, month) {
 function confirmInvoice(explicitClientId, explicitMonth) {
   const filterClient = explicitClientId || document.getElementById('invoiceClientPick').value;
   const filterMonth   = explicitMonth !== undefined ? explicitMonth : document.getElementById('invoiceMonthPick').value;
-  const typedInvoiceNum = explicitClientId ? null : document.getElementById('invoiceNumInput').value;
+  // Only count it as a manual override if it differs from what we
+  // pre-filled — an untouched suggestion must go through the normal
+  // auto-assign path so it can't regress the counter.
+  const typedInvoiceNum = explicitClientId ? null : typedInvoiceOverride();
   closeInvoiceModal();
   if (!filterClient) return;
 
@@ -2767,7 +2851,7 @@ function monthAlreadyInvoiced(client, monthStr, suffix) {
 // everything through the current month is invoiced, or no start date is set.
 function findNextUnbilledFeeMonth(client) {
   if (!client || client.billingType !== 'retainer' || !client.retainerStartDate) return null;
-  const currentMonth = new Date().toISOString().slice(0, 7);
+  const currentMonth = localMonthStr();
   let [y, m] = client.retainerStartDate.slice(0, 7).split('-').map(Number);
   while (true) {
     const monthStr = `${y}-${String(m).padStart(2, '0')}`;
@@ -2787,7 +2871,7 @@ function findNextUnbilledFeeMonth(client) {
 // modal.
 function findNextUnbilledOverageMonth(client) {
   if (!client || client.billingType !== 'retainer' || !client.retainerStartDate) return null;
-  const currentMonth = new Date().toISOString().slice(0, 7);
+  const currentMonth = localMonthStr();
   let [y, m] = client.retainerStartDate.slice(0, 7).split('-').map(Number);
   while (true) {
     const monthStr = `${y}-${String(m).padStart(2, '0')}`;
@@ -2822,7 +2906,7 @@ function nextMonthStr(monthStr) {
 // month's flat fee.
 function findNextUnbilledStatementMonth(client) {
   if (!client || client.billingType !== 'retainer' || !client.retainerStartDate) return null;
-  const currentMonth = new Date().toISOString().slice(0, 7);
+  const currentMonth = localMonthStr();
   let [y, m] = client.retainerStartDate.slice(0, 7).split('-').map(Number);
   while (true) {
     const monthStr = `${y}-${String(m).padStart(2, '0')}`;
@@ -3360,7 +3444,7 @@ function generateStatementInvoiceForClient(clientId, mode) {
     return;
   }
   const key = `${clientId}-${month}-statement`;
-  const suggested = (state.invoiceNumbers && state.invoiceNumbers[key]) || `INV-${state.nextInvoiceNum || 1001}`;
+  const suggested = (state.invoiceNumbers && state.invoiceNumbers[key]) || nextFreeInvoiceNum();
   const typed = prompt('Invoice number for this Monthly Statement (edit if it needs to be out of the usual order):', suggested);
   if (typed === null) return; // cancelled
   generateStatementInvoice(clientId, month, mode, typed);
@@ -3369,7 +3453,7 @@ function generateStatementInvoiceForClient(clientId, mode) {
 function previewStatementInvoice(clientId, month) {
   const client = state.clients.find(c => c.id === clientId);
   if (!client) return;
-  const data = buildStatementInvoiceData(clientId, month || new Date().toISOString().slice(0, 7));
+  const data = buildStatementInvoiceData(clientId, month || localMonthStr());
   if (!data) return;
   openInvoiceWindow(renderStatementInvoiceHtml(data, 'PREVIEW', true));
 }
@@ -3383,7 +3467,7 @@ function generateFeeInvoiceForClient(clientId, mode) {
     return;
   }
   const key = `${clientId}-${month}-fee`;
-  const suggested = (state.invoiceNumbers && state.invoiceNumbers[key]) || `INV-${state.nextInvoiceNum || 1001}`;
+  const suggested = (state.invoiceNumbers && state.invoiceNumbers[key]) || nextFreeInvoiceNum();
   const typed = prompt('Invoice number for this Retainer Fee invoice (edit if it needs to be out of the usual order):', suggested);
   if (typed === null) return; // cancelled
   generateFeeInvoice(clientId, month, mode, typed);
@@ -3398,7 +3482,7 @@ function generateOverageInvoiceForClient(clientId, mode) {
     return;
   }
   const key = `${clientId}-${month}-overage`;
-  const suggested = (state.invoiceNumbers && state.invoiceNumbers[key]) || `INV-${state.nextInvoiceNum || 1001}`;
+  const suggested = (state.invoiceNumbers && state.invoiceNumbers[key]) || nextFreeInvoiceNum();
   const typed = prompt('Invoice number for this Monthly Summary invoice (edit if it needs to be out of the usual order):', suggested);
   if (typed === null) return; // cancelled
   generateOverageInvoice(clientId, month, mode, typed);
@@ -3410,7 +3494,7 @@ function renderRetainersList() {
   const retainerClients = state.clients.filter(c => c.billingType === 'retainer');
   if (!retainerClients.length) { body.innerHTML = '<p class="empty">No retainer clients yet — set one up above.</p>'; return; }
 
-  const currentMonth = new Date().toISOString().slice(0, 7);
+  const currentMonth = localMonthStr();
   const monthLabel = m => new Date(m + '-02').toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
   body.innerHTML = `
     <table>
@@ -3447,7 +3531,7 @@ function renderRetainersList() {
             <td colspan="7" style="padding-top:0">
               <div style="display:flex;gap:10px;align-items:flex-start;padding-top:2px">
                 <span style="font-size:0.72rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);white-space:nowrap;padding-top:7px">Scope of Engagement</span>
-                <textarea rows="1" placeholder="What this client's retainer covers — shown on their invoices" onblur="saveRetainerDescription('${c.id}', this.value)" style="flex:1;resize:vertical;font-family:inherit;font-size:0.85rem;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 10px;outline:none">${c.retainerDescription || ''}</textarea>
+                <textarea rows="1" placeholder="What this client's retainer covers — shown on their invoices" onblur="saveRetainerDescription('${c.id}', this.value)" style="flex:1;resize:vertical;font-family:inherit;font-size:0.85rem;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 10px;outline:none">${escHtml(c.retainerDescription)}</textarea>
               </div>
             </td>
           </tr>
@@ -3458,12 +3542,12 @@ function renderRetainersList() {
                 <div style="display:flex;align-items:center;gap:6px">
                   <span style="font-size:0.78rem;color:var(--muted);width:75px">Advisory</span>
                   <input type="number" min="0" step="1" placeholder="$" value="${c.advisoryAmount || ''}" onblur="saveRetainerField('${c.id}', 'advisoryAmount', this.value, true)" style="width:80px;font-size:0.85rem;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px;outline:none" />
-                  <input type="text" placeholder="What this portion covers" value="${c.advisoryDescription || ''}" onblur="saveRetainerField('${c.id}', 'advisoryDescription', this.value, false)" style="width:200px;font-size:0.85rem;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px;outline:none" />
+                  <input type="text" placeholder="What this portion covers" value="${escHtml(c.advisoryDescription)}" onblur="saveRetainerField('${c.id}', 'advisoryDescription', this.value, false)" style="width:200px;font-size:0.85rem;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px;outline:none" />
                 </div>
                 <div style="display:flex;align-items:center;gap:6px">
                   <span style="font-size:0.78rem;color:var(--muted);width:75px">Maintenance</span>
                   <input type="number" min="0" step="1" placeholder="$" value="${c.maintenanceAmount || ''}" onblur="saveRetainerField('${c.id}', 'maintenanceAmount', this.value, true)" style="width:80px;font-size:0.85rem;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px;outline:none" />
-                  <input type="text" placeholder="What this portion covers" value="${c.maintenanceDescription || ''}" onblur="saveRetainerField('${c.id}', 'maintenanceDescription', this.value, false)" style="width:200px;font-size:0.85rem;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px;outline:none" />
+                  <input type="text" placeholder="What this portion covers" value="${escHtml(c.maintenanceDescription)}" onblur="saveRetainerField('${c.id}', 'maintenanceDescription', this.value, false)" style="width:200px;font-size:0.85rem;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px;outline:none" />
                 </div>
               </div>
             </td>
@@ -3624,31 +3708,38 @@ function buildProjectInvoiceData(projectId, part) {
   const depositAmount = project.depositAmount || 0;
   const balanceAmount = totalAmount - depositAmount;
   const amount = part === 'deposit' ? depositAmount : balanceAmount;
-  const partLabel = part === 'deposit' ? 'Deposit' : 'Balance';
-  return { client, project, part, partLabel, amount, totalAmount, depositAmount, balanceAmount };
+  // $0 deposit = a one-time flat-fee job (training, workshop, ...): there is
+  // only ever one invoice, for the full amount, so it's labeled "Invoice"
+  // rather than "Balance" (there's no earlier payment it's the balance of).
+  const isFlatFee = depositAmount === 0;
+  const partLabel = part === 'deposit' ? 'Deposit' : (isFlatFee ? 'Invoice' : 'Balance');
+  return { client, project, part, partLabel, amount, totalAmount, depositAmount, balanceAmount, isFlatFee };
 }
 
 function renderProjectInvoiceText(data, invoiceNum) {
-  const { client, project, partLabel, amount, totalAmount, balanceAmount, part } = data;
+  const { client, project, partLabel, amount, totalAmount, balanceAmount, part, isFlatFee } = data;
   const dateGenerated = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  const title = isFlatFee ? 'CONSULTING INVOICE' : `CONSULTING INVOICE — PROJECT ${partLabel.toUpperCase()}`;
   return [
-    `CONSULTING INVOICE — PROJECT ${partLabel.toUpperCase()}`, '='.repeat(30 + partLabel.length), '',
+    title, '='.repeat(title.length), '',
     `Invoice #:    ${invoiceNum}`, `Bill To:      ${client.name}`, `Project:      ${project.name}`,
     project.poNumber ? `PO #:         ${project.poNumber}` : null,
     `Invoice Date: ${dateGenerated}`, `Payment Due:  ${netDueDateLabel(15)}`, '',
     `Project Total: ${fmtMoney(totalAmount)}`,
     part === 'deposit' ? `Remaining Balance (due on completion): ${fmtMoney(balanceAmount)}` : null,
     '',
-    `${partLabel.toUpperCase()} DUE: ${fmtMoney(amount)}`, '', '--', 'Cirrobound Solutions',
+    `${isFlatFee ? 'AMOUNT' : partLabel.toUpperCase()} DUE: ${fmtMoney(amount)}`, '', '--', 'Cirrobound Solutions',
   ].filter(l => l !== null).join('\n');
 }
 
 function renderProjectInvoiceHtml(data, invoiceNum, isPreview) {
-  const { client, project, part, partLabel, amount, totalAmount, balanceAmount } = data;
+  const { client, project, part, partLabel, amount, totalAmount, balanceAmount, isFlatFee } = data;
   const dateGenerated = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
   const note = part === 'deposit'
     ? `Project Deposit — ${project.name}. Total project cost: ${fmtMoney(totalAmount)}. Remaining balance of ${fmtMoney(balanceAmount)} due on completion.`
-    : `Final Payment — ${project.name}. Project total: ${fmtMoney(totalAmount)}.`;
+    : isFlatFee
+      ? `Flat fee — ${project.name}.`
+      : `Final Payment — ${project.name}. Project total: ${fmtMoney(totalAmount)}.`;
   return `<!DOCTYPE html><html><head><title>Invoice – ${client.name}</title><style>${INVOICE_STYLE}</style></head><body>
     ${previewBannerHtml(isPreview)}
     ${invoiceHeaderHtml('Invoice')}
@@ -3687,13 +3778,15 @@ function generateProjectInvoice(projectId, part, mode, invoiceNumOverride) {
 function generateProjectInvoiceForPart(projectId, part, mode) {
   const project = state.projects.find(p => p.id === projectId);
   if (!project) return;
+  if (part === 'deposit' && !(project.depositAmount > 0)) return; // flat-fee job: no deposit invoice
   const key = `project-${projectId}-${part}`;
   if (state.invoiceNumbers && state.invoiceNumbers[key]) {
     alert(`The ${part} invoice for this project has already been generated — use Invoice History to reprint it.`);
     return;
   }
-  const suggested = `INV-${state.nextInvoiceNum || 1001}`;
-  const typed = prompt(`Invoice number for this ${part === 'deposit' ? 'Deposit' : 'Balance'} invoice (edit if it needs to be out of the usual order):`, suggested);
+  const label = part === 'deposit' ? 'Deposit' : (project.depositAmount > 0 ? 'Balance' : 'flat-fee');
+  const suggested = nextFreeInvoiceNum();
+  const typed = prompt(`Invoice number for this ${label} invoice (edit if it needs to be out of the usual order):`, suggested);
   if (typed === null) return; // cancelled
   generateProjectInvoice(projectId, part, mode, typed);
 }
@@ -3710,6 +3803,9 @@ function previewProjectInvoice(projectId, part) {
 // tab stays in sync), and a Reprint button — so checking payment status
 // or re-sending the document never requires a trip to Invoice History.
 function projectInvoicePartCellHtml(project, part) {
+  if (part === 'deposit' && !(project.depositAmount > 0)) {
+    return '<span style="color:var(--muted)">No deposit — flat fee</span>';
+  }
   const key = `project-${project.id}-${part}`;
   const rec = (state.invoiceHistory || []).find(h => h.key === key && !h.voided);
   if (!rec) {
@@ -3740,7 +3836,7 @@ function renderProjects() {
     <table>
       <thead><tr>
         <th>Client</th><th>Project</th><th>Total</th><th>Deposit</th><th>Balance</th>
-        <th>PO</th><th>Agreement</th><th>Deposit Invoice</th><th>Balance Invoice</th><th></th>
+        <th>PO</th><th>Agreement</th><th>Deposit Invoice</th><th>Final / Flat-Fee Invoice</th><th></th>
       </tr></thead>
       <tbody>
         ${state.projects.map(p => {
@@ -4017,7 +4113,7 @@ function togglePaid(historyId) {
   const rec = (state.invoiceHistory || []).find(h => h.id === historyId);
   if (!rec) return;
   rec.paid = !rec.paid;
-  rec.paidAt = rec.paid ? new Date().toISOString() : null;
+  rec.paidAt = rec.paid ? localTodayStamp() : null;
   save();
   odAutoSave();
   renderInvoiceHistory();
@@ -4028,7 +4124,7 @@ function toggleSent(historyId) {
   const rec = (state.invoiceHistory || []).find(h => h.id === historyId);
   if (!rec) return;
   rec.sent = !rec.sent;
-  rec.sentAt = rec.sent ? new Date().toISOString() : null;
+  rec.sentAt = rec.sent ? localTodayStamp() : null;
   save();
   odAutoSave();
   renderInvoiceHistory();
@@ -4094,7 +4190,7 @@ async function uploadPaymentDocument(historyId, file) {
     if (!res.ok) throw new Error(await res.text());
     const item = await res.json();
     rec.paymentDocument = { fileName: file.name, driveItemId: item.id, webUrl: item.webUrl };
-    if (!rec.paid) { rec.paid = true; rec.paidAt = new Date().toISOString(); }
+    if (!rec.paid) { rec.paid = true; rec.paidAt = localTodayStamp(); }
     save();
     odAutoSave();
     renderInvoiceHistory();

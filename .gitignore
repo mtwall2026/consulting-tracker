@@ -1,1 +1,6 @@
 consulting-tracker-data.json
+
+# Client documents uploaded by the app (POs, service agreements, payment receipts).
+# Live in the same OneDrive folder as this repo — never commit them to the public repo.
+Payments/
+Projects/
