@@ -3898,7 +3898,10 @@ function renderProjectTimeList(p, prefix) {
         <tr>
           <td>${fmtDate(t.date)}</td>
           <td>${(t.minutes / 60).toFixed(2)}</td>
-          <td>${escHtml(t.note) || '<span style="color:var(--muted)">&mdash;</span>'}</td>
+          <td><input type="text" value="${escHtml(t.note)}" placeholder="Add a reason..." title="Edit reason - saves when you click away"
+                onchange="editProjectTimeNote('${p.id}', '${t.id}', this.value)"
+                style="width:100%;min-width:120px;background:transparent;border:1px solid transparent;border-radius:6px;color:var(--text);padding:4px 6px"
+                onfocus="this.style.borderColor='var(--border)'" onblur="this.style.borderColor='transparent'" /></td>
           <td><button class="del-row" onclick="deleteProjectTime('${p.id}', '${t.id}')" title="Delete">&times;</button></td>
         </tr>`).join('')}
       </tbody>
@@ -3929,6 +3932,79 @@ function deleteProjectTime(projectId, logId) {
   refreshOpenProjectTimeLists(p);
   renderProjects();
 }
+// Update the reason/note on an existing time log.
+function editProjectTimeNote(projectId, logId, note) {
+  const p = state.projects.find(x => x.id === projectId);
+  const t = p && (p.timeLog || []).find(x => x.id === logId);
+  if (!t) return;
+  t.note = note.trim();
+  save(); odAutoSave();
+}
+
+// -- Project session timer ----------------------------------------------
+// Start it when you begin working on a project, stop it when you're done:
+// the whole session becomes ONE entry in that project's timeLog. It has its
+// own localStorage key (separate from the Time Tracking timer 'ct_timer'),
+// survives page refreshes, and never touches state.entries or invoices.
+// Only one project timer runs at a time.
+const PROJECT_TIMER_KEY = 'ct_project_timer';
+let projectTimerInterval = null;
+
+function getProjectTimer() {
+  try { return JSON.parse(localStorage.getItem(PROJECT_TIMER_KEY)) || null; } catch { return null; }
+}
+function fmtElapsed(ms) {
+  const sec = Math.floor(ms / 1000);
+  return `${Math.floor(sec / 3600)}:${String(Math.floor(sec / 60) % 60).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
+}
+function startProjectTimer(projectId) {
+  const running = getProjectTimer();
+  if (running) {
+    const other = state.projects.find(x => x.id === running.projectId);
+    alert(`A timer is already running${other ? ' on "' + other.name + '"' : ''}. Stop it first.`);
+    return;
+  }
+  localStorage.setItem(PROJECT_TIMER_KEY, JSON.stringify({ projectId, start: Date.now() }));
+  renderProjects();
+}
+function stopProjectTimer() {
+  const running = getProjectTimer();
+  if (!running) return;
+  const p = state.projects.find(x => x.id === running.projectId);
+  const minutes = Math.round((Date.now() - running.start) / 60000);
+  if (!p) { localStorage.removeItem(PROJECT_TIMER_KEY); renderProjects(); return; }
+  if (minutes < 1) {
+    if (confirm('Less than a minute recorded - discard this session?')) {
+      localStorage.removeItem(PROJECT_TIMER_KEY);
+      renderProjects();
+    }
+    return;
+  }
+  const note = prompt(`Stop timer on "${p.name}" - ${fmtElapsed(Date.now() - running.start)}.\nWhat did you work on this session?`, '');
+  if (note === null) return; // cancelled: timer keeps running
+  if (!p.timeLog) p.timeLog = [];
+  // Session is dated the day it started
+  p.timeLog.push({ id: uid(), date: localDateStr(new Date(running.start)), minutes, note: note.trim() });
+  localStorage.removeItem(PROJECT_TIMER_KEY);
+  save(); odAutoSave();
+  refreshOpenProjectTimeLists(p);
+  renderProjects();
+}
+// Live-update any running-timer displays once a second.
+function tickProjectTimer() {
+  const running = getProjectTimer();
+  if (!running) { clearInterval(projectTimerInterval); projectTimerInterval = null; return; }
+  document.querySelectorAll('.project-timer-elapsed').forEach(el => { el.textContent = fmtElapsed(Date.now() - running.start); });
+}
+function projectTimerCellHtml(project) {
+  const running = getProjectTimer();
+  if (running && running.projectId === project.id) {
+    if (!projectTimerInterval) projectTimerInterval = setInterval(tickProjectTimer, 1000);
+    return `<button class="btn btn-danger btn-sm" onclick="stopProjectTimer()" style="margin-top:4px">&#9632; Stop <span class="project-timer-elapsed">${fmtElapsed(Date.now() - running.start)}</span></button>`;
+  }
+  return `<button class="btn btn-ghost btn-sm" onclick="startProjectTimer('${project.id}')" style="margin-top:4px"${running ? ' disabled title="Another project timer is running"' : ''}>&#9654; Start</button>`;
+}
+
 // Re-render whichever time-log view(s) are open for this project.
 function refreshOpenProjectTimeLists(p) {
   if (document.getElementById('projectTimeModal').style.display === 'flex') renderProjectTimeList(p, 'projectTime');
@@ -3985,6 +4061,7 @@ function renderProjects() {
             <td>${fmtMoney(balance)}</td>
             <td>
               <div style="font-size:0.85rem">${projectTimeSummaryText(p)}</div>
+              ${projectTimerCellHtml(p)}
               <button class="btn btn-ghost btn-sm" onclick="openProjectTimeModal('${p.id}')" style="margin-top:4px">Log Time</button>
             </td>
             <td>
