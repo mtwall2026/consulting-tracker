@@ -384,6 +384,33 @@
   </div>
 </div>
 
+<!-- Project Time Modal - a log stored ON the project, fully separate from
+     time entries; nothing in billing or invoicing ever reads it. -->
+<div id="projectTimeModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:999;align-items:center;justify-content:center">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:28px;min-width:340px;max-width:520px;width:100%;display:flex;flex-direction:column;gap:14px;max-height:85vh;overflow:auto">
+    <h2 style="margin:0" id="projectTimeModalTitle">Project Time</h2>
+    <p style="margin:0;color:var(--muted);font-size:0.8rem">For your own tracking only &mdash; kept separate from Time Tracking, and never used on any invoice.</p>
+    <input type="hidden" id="projectTimeId" />
+    <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:0.8rem;color:var(--muted)">Date
+        <input type="date" id="projectTimeDate" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px" />
+      </label>
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:0.8rem;color:var(--muted)">Hours
+        <input type="number" id="projectTimeHours" min="0.25" step="0.25" placeholder="e.g. 1.5" style="width:90px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px" />
+      </label>
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:0.8rem;color:var(--muted);flex:1;min-width:140px">Note
+        <input type="text" id="projectTimeNote" placeholder="What you worked on" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px" />
+      </label>
+      <button class="btn btn-primary btn-sm" onclick="addProjectTime()">+ Log</button>
+    </div>
+    <div id="projectTimeSummary" style="font-size:0.9rem"></div>
+    <div id="projectTimeList"></div>
+    <div style="display:flex;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeProjectTimeModal()">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- Sign-in Gate -->
 <div id="signInGate" style="display:none;position:fixed;inset:0;background:var(--bg);z-index:9999;flex-direction:column;align-items:center;justify-content:center;gap:24px">
   <img src="logo.png" alt="Cirrobound Solutions" style="height:80px;width:auto;margin-bottom:8px" />
@@ -3713,7 +3740,10 @@ function buildProjectInvoiceData(projectId, part) {
   // rather than "Balance" (there's no earlier payment it's the balance of).
   const isFlatFee = depositAmount === 0;
   const partLabel = part === 'deposit' ? 'Deposit' : (isFlatFee ? 'Invoice' : 'Balance');
-  return { client, project, part, partLabel, amount, totalAmount, depositAmount, balanceAmount, isFlatFee };
+  // Strip the project's private time log before this becomes invoice data -
+  // it must never reach an invoice or its frozen history snapshot.
+  const { timeLog, ...projectForInvoice } = project;
+  return { client, project: projectForInvoice, part, partLabel, amount, totalAmount, depositAmount, balanceAmount, isFlatFee };
 }
 
 function renderProjectInvoiceText(data, invoiceNum) {
@@ -3802,6 +3832,76 @@ function previewProjectInvoice(projectId, part) {
 // to the SAME togglePaid() Invoice History uses (so toggling from either
 // tab stays in sync), and a Reprint button — so checking payment status
 // or re-sending the document never requires a trip to Invoice History.
+// -- Project time log --------------------------------------------------
+// Stored on the project itself (project.timeLog), completely separate from
+// state.entries - so Time Tracking, its summary/charts/calendar, retainer
+// hours, overage, and every invoice builder never see it. Its only use is
+// showing hours spent and the effective hourly rate of a flat-fee job.
+function projectHours(project) {
+  return (project.timeLog || []).reduce((s, t) => s + t.minutes, 0) / 60;
+}
+function projectTimeSummaryText(project) {
+  const hrs = projectHours(project);
+  if (!hrs) return '<span style="color:var(--muted)">&mdash;</span>';
+  const eff = (project.totalAmount || 0) / hrs;
+  return `${hrs.toFixed(2)}h <span style="color:var(--muted)">&middot; ${fmtMoney(eff)}/hr</span>`;
+}
+function openProjectTimeModal(projectId) {
+  const p = state.projects.find(x => x.id === projectId);
+  if (!p) return;
+  document.getElementById('projectTimeModalTitle').textContent = `Project Time \u2014 ${p.name}`;
+  document.getElementById('projectTimeId').value = projectId;
+  document.getElementById('projectTimeDate').value = localDateStr();
+  document.getElementById('projectTimeHours').value = '';
+  document.getElementById('projectTimeNote').value = '';
+  renderProjectTimeList(p);
+  document.getElementById('projectTimeModal').style.display = 'flex';
+}
+function closeProjectTimeModal() { document.getElementById('projectTimeModal').style.display = 'none'; }
+function renderProjectTimeList(p) {
+  const hrs = projectHours(p);
+  document.getElementById('projectTimeSummary').innerHTML = hrs
+    ? `<strong>${hrs.toFixed(2)}h</strong> logged &middot; effective rate <strong>${fmtMoney((p.totalAmount || 0) / hrs)}/hr</strong> on a ${fmtMoney(p.totalAmount || 0)} project`
+    : '<span style="color:var(--muted)">No time logged yet.</span>';
+  const logs = [...(p.timeLog || [])].sort((a, b) => b.date.localeCompare(a.date));
+  document.getElementById('projectTimeList').innerHTML = logs.length ? `
+    <table>
+      <thead><tr><th>Date</th><th>Hours</th><th>Note</th><th></th></tr></thead>
+      <tbody>${logs.map(t => `
+        <tr>
+          <td>${fmtDate(t.date)}</td>
+          <td>${(t.minutes / 60).toFixed(2)}</td>
+          <td>${escHtml(t.note) || '<span style="color:var(--muted)">&mdash;</span>'}</td>
+          <td><button class="del-row" onclick="deleteProjectTime('${p.id}', '${t.id}')" title="Delete">&times;</button></td>
+        </tr>`).join('')}
+      </tbody>
+    </table>` : '';
+}
+function addProjectTime() {
+  const p = state.projects.find(x => x.id === document.getElementById('projectTimeId').value);
+  if (!p) return;
+  const date = document.getElementById('projectTimeDate').value;
+  const hours = parseFloat(document.getElementById('projectTimeHours').value);
+  const note = document.getElementById('projectTimeNote').value.trim();
+  if (!date) { alert('Pick a date.'); return; }
+  if (!hours || hours <= 0) { alert('Enter the hours worked.'); return; }
+  if (!p.timeLog) p.timeLog = [];
+  p.timeLog.push({ id: uid(), date, minutes: Math.round(hours * 60), note });
+  document.getElementById('projectTimeHours').value = '';
+  document.getElementById('projectTimeNote').value = '';
+  save(); odAutoSave();
+  renderProjectTimeList(p);
+  renderProjects();
+}
+function deleteProjectTime(projectId, logId) {
+  const p = state.projects.find(x => x.id === projectId);
+  if (!p || !confirm('Delete this time log?')) return;
+  p.timeLog = (p.timeLog || []).filter(t => t.id !== logId);
+  save(); odAutoSave();
+  renderProjectTimeList(p);
+  renderProjects();
+}
+
 function projectInvoicePartCellHtml(project, part) {
   if (part === 'deposit' && !(project.depositAmount > 0)) {
     return '<span style="color:var(--muted)">No deposit — flat fee</span>';
@@ -3835,7 +3935,7 @@ function renderProjects() {
   body.innerHTML = `
     <table>
       <thead><tr>
-        <th>Client</th><th>Project</th><th>Total</th><th>Deposit</th><th>Balance</th>
+        <th>Client</th><th>Project</th><th>Total</th><th>Deposit</th><th>Balance</th><th>Time Logged</th>
         <th>PO</th><th>Agreement</th><th>Deposit Invoice</th><th>Final / Flat-Fee Invoice</th><th></th>
       </tr></thead>
       <tbody>
@@ -3850,6 +3950,10 @@ function renderProjects() {
             <td>${fmtMoney(p.totalAmount || 0)}</td>
             <td>${fmtMoney(p.depositAmount || 0)}</td>
             <td>${fmtMoney(balance)}</td>
+            <td>
+              <div style="font-size:0.85rem">${projectTimeSummaryText(p)}</div>
+              <button class="btn btn-ghost btn-sm" onclick="openProjectTimeModal('${p.id}')" style="margin-top:4px">Log Time</button>
+            </td>
             <td>
               ${p.poNumber ? `<div style="font-size:0.85rem;margin-bottom:4px">${p.poNumber}</div>` : ''}
               ${p.poDocument
