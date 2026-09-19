@@ -350,7 +350,7 @@
 
 <!-- Edit Project Modal -->
 <div id="projectEditModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:999;align-items:center;justify-content:center">
-  <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:28px;min-width:320px;max-width:420px;display:flex;flex-direction:column;gap:16px">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:28px;min-width:320px;max-width:520px;width:100%;display:flex;flex-direction:column;gap:16px;max-height:90vh;overflow:auto">
     <h2 style="margin:0" id="projectEditModalTitle">Edit Project</h2>
     <input type="hidden" id="projectEditId" />
     <label style="display:flex;flex-direction:column;gap:6px;font-size:0.85rem;color:var(--muted)">Project Name
@@ -376,6 +376,25 @@
       Service Agreement
       <div id="projectEditAgreementCurrent" style="font-size:0.85rem;color:var(--text)"></div>
       <input type="file" id="projectEditAgreementFile" style="font-size:0.85rem" />
+    </div>
+    <div style="border-top:1px solid var(--border);padding-top:14px;display:flex;flex-direction:column;gap:10px">
+      <div style="font-size:0.85rem;color:var(--muted)">
+        Time Log <span style="font-size:0.75rem">&mdash; for your own tracking; never used on any invoice. Logs save immediately (Cancel doesn't undo them).</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:0.8rem;color:var(--muted)">Date
+          <input type="date" id="projectEditTimeDate" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px" />
+        </label>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:0.8rem;color:var(--muted)">Hours
+          <input type="number" id="projectEditTimeHours" min="0.25" step="0.25" placeholder="e.g. 1.5" style="width:90px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px" />
+        </label>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:0.8rem;color:var(--muted);flex:1;min-width:140px">Note
+          <input type="text" id="projectEditTimeNote" placeholder="What you worked on" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px" />
+        </label>
+        <button class="btn btn-primary btn-sm" onclick="addProjectTime('projectEditTime')">+ Log</button>
+      </div>
+      <div id="projectEditTimeSummary" style="font-size:0.9rem"></div>
+      <div id="projectEditTimeList"></div>
     </div>
     <div style="display:flex;gap:10px;justify-content:flex-end">
       <button class="btn btn-ghost" onclick="closeProjectEditModal()">Cancel</button>
@@ -3645,6 +3664,10 @@ function openProjectEditModal(projectId) {
   document.getElementById('projectEditAgreementCurrent').textContent = p.agreementDocument ? `Current: ${p.agreementDocument.fileName} (choose a file below to replace)` : 'No service agreement uploaded yet.';
   document.getElementById('projectEditPoFile').value = '';
   document.getElementById('projectEditAgreementFile').value = '';
+  document.getElementById('projectEditTimeDate').value = localDateStr();
+  document.getElementById('projectEditTimeHours').value = '';
+  document.getElementById('projectEditTimeNote').value = '';
+  renderProjectTimeList(p, 'projectEditTime');
   document.getElementById('projectEditModal').style.display = 'flex';
 }
 function closeProjectEditModal() { document.getElementById('projectEditModal').style.display = 'none'; }
@@ -3846,6 +3869,9 @@ function projectTimeSummaryText(project) {
   const eff = (project.totalAmount || 0) / hrs;
   return `${hrs.toFixed(2)}h <span style="color:var(--muted)">&middot; ${fmtMoney(eff)}/hr</span>`;
 }
+// Which project a given time-log form belongs to.
+const PROJECT_TIME_ID_FIELD = { projectTime: 'projectTimeId', projectEditTime: 'projectEditId' };
+
 function openProjectTimeModal(projectId) {
   const p = state.projects.find(x => x.id === projectId);
   if (!p) return;
@@ -3854,17 +3880,18 @@ function openProjectTimeModal(projectId) {
   document.getElementById('projectTimeDate').value = localDateStr();
   document.getElementById('projectTimeHours').value = '';
   document.getElementById('projectTimeNote').value = '';
-  renderProjectTimeList(p);
+  renderProjectTimeList(p, 'projectTime');
   document.getElementById('projectTimeModal').style.display = 'flex';
 }
 function closeProjectTimeModal() { document.getElementById('projectTimeModal').style.display = 'none'; }
-function renderProjectTimeList(p) {
+function renderProjectTimeList(p, prefix) {
+  prefix = prefix || 'projectTime';
   const hrs = projectHours(p);
-  document.getElementById('projectTimeSummary').innerHTML = hrs
+  document.getElementById(prefix + 'Summary').innerHTML = hrs
     ? `<strong>${hrs.toFixed(2)}h</strong> logged &middot; effective rate <strong>${fmtMoney((p.totalAmount || 0) / hrs)}/hr</strong> on a ${fmtMoney(p.totalAmount || 0)} project`
     : '<span style="color:var(--muted)">No time logged yet.</span>';
   const logs = [...(p.timeLog || [])].sort((a, b) => b.date.localeCompare(a.date));
-  document.getElementById('projectTimeList').innerHTML = logs.length ? `
+  document.getElementById(prefix + 'List').innerHTML = logs.length ? `
     <table>
       <thead><tr><th>Date</th><th>Hours</th><th>Note</th><th></th></tr></thead>
       <tbody>${logs.map(t => `
@@ -3877,20 +3904,21 @@ function renderProjectTimeList(p) {
       </tbody>
     </table>` : '';
 }
-function addProjectTime() {
-  const p = state.projects.find(x => x.id === document.getElementById('projectTimeId').value);
+function addProjectTime(prefix) {
+  prefix = prefix || 'projectTime';
+  const p = state.projects.find(x => x.id === document.getElementById(PROJECT_TIME_ID_FIELD[prefix]).value);
   if (!p) return;
-  const date = document.getElementById('projectTimeDate').value;
-  const hours = parseFloat(document.getElementById('projectTimeHours').value);
-  const note = document.getElementById('projectTimeNote').value.trim();
+  const date = document.getElementById(prefix + 'Date').value;
+  const hours = parseFloat(document.getElementById(prefix + 'Hours').value);
+  const note = document.getElementById(prefix + 'Note').value.trim();
   if (!date) { alert('Pick a date.'); return; }
   if (!hours || hours <= 0) { alert('Enter the hours worked.'); return; }
   if (!p.timeLog) p.timeLog = [];
   p.timeLog.push({ id: uid(), date, minutes: Math.round(hours * 60), note });
-  document.getElementById('projectTimeHours').value = '';
-  document.getElementById('projectTimeNote').value = '';
+  document.getElementById(prefix + 'Hours').value = '';
+  document.getElementById(prefix + 'Note').value = '';
   save(); odAutoSave();
-  renderProjectTimeList(p);
+  refreshOpenProjectTimeLists(p);
   renderProjects();
 }
 function deleteProjectTime(projectId, logId) {
@@ -3898,8 +3926,13 @@ function deleteProjectTime(projectId, logId) {
   if (!p || !confirm('Delete this time log?')) return;
   p.timeLog = (p.timeLog || []).filter(t => t.id !== logId);
   save(); odAutoSave();
-  renderProjectTimeList(p);
+  refreshOpenProjectTimeLists(p);
   renderProjects();
+}
+// Re-render whichever time-log view(s) are open for this project.
+function refreshOpenProjectTimeLists(p) {
+  if (document.getElementById('projectTimeModal').style.display === 'flex') renderProjectTimeList(p, 'projectTime');
+  if (document.getElementById('projectEditModal').style.display === 'flex') renderProjectTimeList(p, 'projectEditTime');
 }
 
 function projectInvoicePartCellHtml(project, part) {
