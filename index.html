@@ -469,6 +469,7 @@
     <button class="view-tab" id="tabProjects" onclick="switchView('projects')">Projects</button>
     <button class="view-tab" id="tabExpenses" onclick="switchView('expenses')">Expenses</button>
     <button class="view-tab" id="tabInvoiceHistory" onclick="switchView('invoiceHistory')">Invoice History</button>
+    <button class="view-tab" id="tabAccounting" onclick="switchView('accounting')">Accounting</button>
   </div>
 
   <!-- Team View (manager account only) — visible on either tab, since it
@@ -784,6 +785,67 @@
 
   </div> <!-- /viewInvoiceHistory -->
 
+  <!-- ══════════════ Accounting page ══════════════
+       Cirrobound's own books: deposits in, business expenses out, AGI.
+       Its expenses live in state.businessExpenses - a separate list that
+       no client, time-entry, or invoice code ever reads. -->
+  <div id="viewAccounting" style="display:none">
+
+  <div class="card">
+    <div class="log-header">
+      <h2 style="margin-bottom:0">Cirrobound Solutions &mdash; Accounting</h2>
+      <div class="filter-row">
+        <select id="acctYear" onchange="renderAccounting()"></select>
+        <button class="btn btn-ghost btn-sm" onclick="exportAccountingCSV()">Export CSV</button>
+      </div>
+    </div>
+    <div class="summary-grid" id="acctSummary" style="margin-top:14px"></div>
+  </div>
+
+  <!-- 1. Revenue -->
+  <div class="card">
+    <h2>1 &middot; Revenue &mdash; Deposits</h2>
+    <p style="color:var(--muted);font-size:0.85rem;margin-top:-8px">Payments received, from invoices marked Paid in Invoice History, counted on the date paid.</p>
+    <div id="acctDeposits"></div>
+  </div>
+
+  <!-- 2. Business expenses -->
+  <div class="card">
+    <h2>2 &middot; Business Expenses</h2>
+    <div class="manual-row">
+      <label>Date
+        <input type="date" id="bizExpDate" />
+      </label>
+      <label>Category
+        <select id="bizExpCategory"></select>
+      </label>
+      <label>Amount
+        <input type="number" id="bizExpAmount" placeholder="0.00" min="0" step="0.01" style="width:100px" />
+      </label>
+      <label>Description
+        <input id="bizExpDescription" placeholder="What it was for" style="width:200px" />
+      </label>
+      <button class="btn btn-primary" onclick="addBusinessExpense()" style="align-self:flex-end">+ Add Expense</button>
+    </div>
+    <div id="acctExpenses" style="margin-top:14px"></div>
+  </div>
+
+  <!-- 3. AGI -->
+  <div class="card">
+    <h2>3 &middot; Adjusted Gross Income</h2>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:0.8rem;color:var(--muted)">Other income this year (W-2, interest&hellip;) &mdash; optional
+        <input type="number" id="acctOtherIncome" min="0" step="0.01" placeholder="0.00" onchange="saveAccountingYearInputs()" style="width:200px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px" />
+      </label>
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:0.8rem;color:var(--muted)">Other adjustments (SEP-IRA, SE health insurance&hellip;) &mdash; optional
+        <input type="number" id="acctOtherAdjustments" min="0" step="0.01" placeholder="0.00" onchange="saveAccountingYearInputs()" style="width:200px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px" />
+      </label>
+    </div>
+    <div id="acctAgi"></div>
+  </div>
+
+  </div> <!-- /viewAccounting -->
+
 </div>
 
 <script>
@@ -824,7 +886,7 @@ let currentView = 'timeTracking';
 // gate during that window anyway, so there's nothing to protect yet;
 // updateSyncUI() re-checks and redirects non-managers once odAccount
 // is actually known.
-const MANAGER_ONLY_VIEWS = ['customers', 'retainers', 'projects', 'expenses', 'invoiceHistory'];
+const MANAGER_ONLY_VIEWS = ['customers', 'retainers', 'projects', 'expenses', 'invoiceHistory', 'accounting'];
 function switchView(view) {
   if (odAccount && MANAGER_ONLY_VIEWS.includes(view) && !isManager()) view = 'timeTracking';
   currentView = view;
@@ -835,12 +897,14 @@ function switchView(view) {
   document.getElementById('viewRetainers').style.display = view === 'retainers' ? '' : 'none';
   document.getElementById('viewProjects').style.display = view === 'projects' ? '' : 'none';
   document.getElementById('viewInvoiceHistory').style.display = view === 'invoiceHistory' ? '' : 'none';
+  document.getElementById('viewAccounting').style.display = view === 'accounting' ? '' : 'none';
   document.getElementById('tabTimeTracking').classList.toggle('active', view === 'timeTracking');
   document.getElementById('tabCustomers').classList.toggle('active', view === 'customers');
   document.getElementById('tabExpenses').classList.toggle('active', view === 'expenses');
   document.getElementById('tabRetainers').classList.toggle('active', view === 'retainers');
   document.getElementById('tabProjects').classList.toggle('active', view === 'projects');
   document.getElementById('tabInvoiceHistory').classList.toggle('active', view === 'invoiceHistory');
+  document.getElementById('tabAccounting').classList.toggle('active', view === 'accounting');
   // The general Print Invoice button predates the retainer Statement flow
   // and doesn't know about retainer fees/overage — only meaningful on Time
   // Tracking (its original home), so it's hidden everywhere else to avoid
@@ -853,6 +917,7 @@ function switchView(view) {
   else if (view === 'expenses') renderExpenseCharts();
   else if (view === 'retainers') renderRetainersList();
   else if (view === 'projects') renderProjects();
+  else if (view === 'accounting') renderAccounting();
   else renderInvoiceHistory();
 }
 
@@ -876,6 +941,9 @@ function migrateState(s) {
   if (!s.expenses) s.expenses = [];
   if (!s.invoiceHistory) s.invoiceHistory = [];
   if (!s.projects) s.projects = [];
+  // Accounting tab: Cirrobound's own expenses, and per-year AGI inputs
+  if (!s.businessExpenses) s.businessExpenses = [];
+  if (!s.accountingYears) s.accountingYears = {};
   return s;
 }
 function defaultState() {
@@ -885,6 +953,8 @@ function defaultState() {
     expenses: [],
     invoiceHistory: [],
     projects: [],
+    businessExpenses: [],
+    accountingYears: {},
     nextInvoiceNum: 1001
   };
 }
@@ -1053,6 +1123,8 @@ function init() {
   document.getElementById('manualDate').value = localDateStr(now);
   document.getElementById('manualTime').value = now.toTimeString().slice(0, 5);
   document.getElementById('expenseDate').value = localDateStr(now);
+  document.getElementById('bizExpDate').value = localDateStr(now);
+  document.getElementById('bizExpCategory').innerHTML = businessCategoryOptionsHtml();
 
   // Month filter starts on All
   document.getElementById('filterMonth').value = '';
@@ -1063,7 +1135,7 @@ function init() {
   // Land back on whichever tab was open before the last refresh, rather
   // than always defaulting to Time Tracking.
   const savedView = localStorage.getItem('ct_lastView');
-  if (['timeTracking', 'customers', 'expenses', 'retainers', 'projects', 'invoiceHistory'].includes(savedView) && savedView !== currentView) {
+  if (['timeTracking', 'customers', 'expenses', 'retainers', 'projects', 'invoiceHistory', 'accounting'].includes(savedView) && savedView !== currentView) {
     switchView(savedView);
   }
 
@@ -1085,6 +1157,7 @@ function render() {
   renderRetainersList();
   renderProjects();
   renderInvoiceHistory();
+  renderAccounting();
   // Chart.js can't size a canvas correctly while its container is
   // display:none, so only (re)build charts for the currently visible
   // page — switchView() renders the other page's charts on demand.
@@ -1691,6 +1764,267 @@ function renderExpenseSummary() {
         <div class="label">${c.name}</div>
         <div class="value">${fmtMoney(c.amt)}</div>
       </div>`).join('')}`;
+}
+
+// ── Accounting ─────────────────────────────────────────
+// Cirrobound's books for one tax year, cash basis:
+//   1. Revenue  = deposits: invoices marked Paid, on the date they were paid
+//   2. Expenses = state.businessExpenses (entered on this tab only)
+//   3. AGI      = net profit, less half of self-employment tax, plus/minus
+//                 the optional other-income / adjustment inputs
+// Invoice history is only READ here; nothing on this tab changes clients,
+// time entries, client expenses, or invoices.
+
+// Categories laid out like the expense lines on a business tax return
+// (Schedule C), so year-end totals map straight across.
+const BUSINESS_EXPENSE_CATEGORIES = [
+  'Advertising & Marketing', 'Car & Mileage', 'Contract Labor', 'Insurance',
+  'Legal & Professional', 'Office Expense', 'Rent / Lease', 'Equipment & Repairs',
+  'Supplies', 'Taxes & Licenses', 'Travel', 'Meals (50%)',
+  'Utilities, Phone & Internet', 'Software & Subscriptions', 'Education & Training',
+  'Bank & Merchant Fees', 'Home Office', 'Other'
+];
+function businessCategoryOptionsHtml(selected) {
+  return BUSINESS_EXPENSE_CATEGORIES.map(v =>
+    `<option value="${escHtml(v)}" ${v === selected ? 'selected' : ''}>${escHtml(v)}</option>`).join('');
+}
+// Business meals are only 50% deductible; everything else counts in full.
+function deductiblePct(category) { return /^Meals/.test(category || '') ? 0.5 : 1; }
+
+// Dollar total of one invoice, from the snapshot frozen when it was issued.
+function invoiceRecordTotal(r) {
+  const snap = r.snapshot || {};
+  if (r.kind === 'project') return snap.amount || 0;
+  if (r.kind === 'fee') return snap.fee || 0;
+  return snap.grandTotal || 0;   // general, overage, statement
+}
+// Paid date as a local YYYY-MM-DD ('' if not paid).
+function invoicePaidDateStr(r) {
+  return r.paid && r.paidAt ? localDateStr(new Date(r.paidAt)) : '';
+}
+
+// Every number for one year - used by the page and the CSV export.
+function buildAccounting(year) {
+  const live = (state.invoiceHistory || []).filter(r => !r.voided);
+  const deposits = live.filter(r => invoicePaidDateStr(r).startsWith(year))
+    .sort((a, b) => invoicePaidDateStr(a).localeCompare(invoicePaidDateStr(b)));
+  const revenue = deposits.reduce((sum, r) => sum + invoiceRecordTotal(r), 0);
+  // Not income yet on a cash basis - shown so nothing looks missing
+  const unpaid = live.filter(r => !r.paid);
+  const unpaidTotal = unpaid.reduce((sum, r) => sum + invoiceRecordTotal(r), 0);
+
+  const expenses = (state.businessExpenses || []).filter(e => (e.date || '').startsWith(year))
+    .sort((a, b) => b.date.localeCompare(a.date));
+  const byCat = {};
+  expenses.forEach(e => {
+    if (!byCat[e.category]) byCat[e.category] = { category: e.category, spent: 0, deductible: 0 };
+    byCat[e.category].spent += e.amount;
+    byCat[e.category].deductible += e.amount * deductiblePct(e.category);
+  });
+  const categories = Object.values(byCat).sort((a, b) => b.deductible - a.deductible);
+  const spent = categories.reduce((sum, c) => sum + c.spent, 0);
+  const deductible = categories.reduce((sum, c) => sum + c.deductible, 0);
+
+  const netProfit = revenue - deductible;
+  // Self-employment tax for a single-member LLC / sole proprietor (Schedule
+  // C): 15.3% on 92.35% of net profit, none under $400. Half of it is an
+  // adjustment to income. Ignores the Social Security wage cap.
+  const seTax = netProfit >= 400 ? netProfit * 0.9235 * 0.153 : 0;
+  const seTaxHalf = seTax / 2;
+  const businessIncome = netProfit - seTaxHalf;
+
+  const inputs = (state.accountingYears || {})[year] || {};
+  const otherIncome = inputs.otherIncome || 0;
+  const otherAdjustments = inputs.otherAdjustments || 0;
+  const agi = businessIncome + otherIncome - otherAdjustments;
+
+  return { year, deposits, revenue, unpaid, unpaidTotal, expenses, categories, spent, deductible,
+           netProfit, seTax, seTaxHalf, businessIncome, otherIncome, otherAdjustments, agi };
+}
+
+// Year picker: every year with a deposit or an expense, plus this year.
+function renderAccountingYearOptions() {
+  const el = document.getElementById('acctYear');
+  const prev = el.value;
+  const years = new Set([String(new Date().getFullYear())]);
+  (state.invoiceHistory || []).forEach(r => { const d = invoicePaidDateStr(r); if (d) years.add(d.slice(0, 4)); });
+  (state.businessExpenses || []).forEach(e => { if (e.date) years.add(e.date.slice(0, 4)); });
+  const sorted = [...years].sort((a, b) => b.localeCompare(a));
+  el.innerHTML = sorted.map(y => `<option value="${y}">${y} tax year</option>`).join('');
+  el.value = prev && sorted.includes(prev) ? prev : String(new Date().getFullYear());
+}
+
+function renderAccounting() {
+  renderAccountingYearOptions();
+  const a = buildAccounting(document.getElementById('acctYear').value);
+  const muted = t => `<span style="color:var(--muted)">${t}</span>`;
+  const line = (label, value, opts = {}) => `
+    <tr${opts.total ? ' style="font-weight:700;border-top:2px solid var(--border)"' : ''}>
+      <td style="${opts.indent ? 'padding-left:28px' : ''}">${label}</td>
+      <td class="amount" style="text-align:right">${value}</td>
+    </tr>`;
+
+  // Summary cards
+  document.getElementById('acctSummary').innerHTML = `
+    <div class="summary-card"><div class="label">Deposits</div><div class="value">${fmtMoney(a.revenue)}</div></div>
+    <div class="summary-card"><div class="label">Deductible Expenses</div><div class="value">${fmtMoney(a.deductible)}</div></div>
+    <div class="summary-card"><div class="label">Net Profit</div><div class="value">${fmtMoney(a.netProfit)}</div></div>
+    <div class="summary-card"><div class="label">Est. AGI</div><div class="value">${fmtMoney(a.agi)}</div></div>`;
+
+  // 1. Deposits
+  document.getElementById('acctDeposits').innerHTML = (a.deposits.length ? `
+    <table>
+      <thead><tr><th>Date Received</th><th>Invoice #</th><th>From</th><th style="text-align:right">Amount</th></tr></thead>
+      <tbody>
+        ${a.deposits.map(r => `
+          <tr>
+            <td>${fmtDate(invoicePaidDateStr(r))}</td>
+            <td>${escHtml(r.invoiceNum)}</td>
+            <td>${escHtml(r.clientName)}</td>
+            <td class="amount" style="text-align:right">${fmtMoney(invoiceRecordTotal(r))}</td>
+          </tr>`).join('')}
+        ${line('Total deposits', fmtMoney(a.revenue), { total: true }).replace('<td', '<td colspan="3"')}
+      </tbody>
+    </table>` : '<p class="empty">No deposits recorded for this year.</p>') +
+    (a.unpaid.length ? `<p style="color:var(--muted);font-size:0.8rem;margin:10px 0 0">Not counted yet: ${a.unpaid.length} unpaid invoice${a.unpaid.length === 1 ? '' : 's'} (${fmtMoney(a.unpaidTotal)}). They count in the year they're paid.</p>` : '');
+
+  // 2. Expenses list
+  document.getElementById('acctExpenses').innerHTML = a.expenses.length ? `
+    <table>
+      <thead><tr><th>Date</th><th>Category</th><th>Description</th><th style="text-align:right">Amount</th><th></th></tr></thead>
+      <tbody>
+        ${a.expenses.map(e => `
+          <tr data-bizexpid="${e.id}">
+            <td>${fmtDate(e.date)}</td>
+            <td>${escHtml(e.category)}</td>
+            <td>${escHtml(e.description) || muted('&mdash;')}</td>
+            <td class="amount" style="text-align:right">${fmtMoney(e.amount)}</td>
+            <td style="display:flex;gap:4px">
+              <button class="del-row" onclick="editBusinessExpense('${e.id}')" title="Edit" style="color:var(--accent)">&#9998;</button>
+              <button class="del-row" onclick="deleteBusinessExpense('${e.id}')" title="Delete">&times;</button>
+            </td>
+          </tr>`).join('')}
+      </tbody>
+    </table>` : '<p class="empty">No business expenses for this year yet.</p>';
+
+  // 3. AGI
+  const inputs = (state.accountingYears || {})[a.year] || {};
+  document.getElementById('acctOtherIncome').value = inputs.otherIncome || '';
+  document.getElementById('acctOtherAdjustments').value = inputs.otherAdjustments || '';
+  const expenseLines = a.categories.length
+    ? a.categories.map(c => line(escHtml(c.category) +
+        (c.deductible !== c.spent ? ' ' + muted(`(${fmtMoney(c.spent)} spent, 50% deductible)`) : ''),
+        '&minus;' + fmtMoney(c.deductible), { indent: true })).join('')
+    : line(muted('No expenses yet'), fmtMoney(0), { indent: true });
+  document.getElementById('acctAgi').innerHTML = `
+    <table>
+      <tbody>
+        ${line('Deposits (revenue)', fmtMoney(a.revenue))}
+        ${expenseLines}
+        ${line('Net profit', fmtMoney(a.netProfit), { total: true })}
+        ${line('Self-employment tax (est.) ' + muted('15.3% of 92.35% of net profit &mdash; you owe this, it isn\'t subtracted here'), fmtMoney(a.seTax), { indent: true })}
+        ${line('Deductible half of SE tax', '&minus;' + fmtMoney(a.seTaxHalf), { indent: true })}
+        ${line('Business income', fmtMoney(a.businessIncome), { total: true })}
+        ${a.otherIncome ? line('Other income', '+' + fmtMoney(a.otherIncome), { indent: true }) : ''}
+        ${a.otherAdjustments ? line('Other adjustments', '&minus;' + fmtMoney(a.otherAdjustments), { indent: true }) : ''}
+        ${line('Adjusted Gross Income (est.)', fmtMoney(a.agi), { total: true })}
+      </tbody>
+    </table>
+    <p style="color:var(--muted);font-size:0.8rem;margin:12px 0 0">
+      Assumes Cirrobound files on Schedule C (single-member LLC or sole proprietor); if it's taxed as an S-corp the SE-tax lines don't apply.
+      These are estimates &mdash; confirm with your accountant.
+    </p>`;
+}
+
+function addBusinessExpense() {
+  const date = document.getElementById('bizExpDate').value;
+  const category = document.getElementById('bizExpCategory').value;
+  const amount = parseFloat(document.getElementById('bizExpAmount').value);
+  const description = document.getElementById('bizExpDescription').value.trim();
+  if (!date) { alert('Pick a date.'); return; }
+  if (!amount || amount <= 0) { alert('Enter a valid amount.'); return; }
+  state.businessExpenses.unshift({ id: uid(), date, category, amount, description });
+  document.getElementById('bizExpAmount').value = '';
+  document.getElementById('bizExpDescription').value = '';
+  // Jump the page to the year just entered so the new expense is visible
+  document.getElementById('acctYear').value = date.slice(0, 4);
+  save(); odAutoSave();
+  renderAccounting();
+}
+
+function deleteBusinessExpense(id) {
+  if (!confirm('Delete this expense?')) return;
+  state.businessExpenses = state.businessExpenses.filter(e => e.id !== id);
+  save(); odAutoSave();
+  renderAccounting();
+}
+
+// Turn one row into inputs; Save writes it back, Cancel just re-renders.
+function editBusinessExpense(id) {
+  const tr = document.querySelector(`tr[data-bizexpid="${id}"]`);
+  const e = state.businessExpenses.find(x => x.id === id);
+  if (!tr || !e) return;
+  const st = 'background:var(--surface2);border:1px solid var(--border);border-radius:5px;color:var(--text);padding:4px 6px;font-size:0.82rem';
+  tr.innerHTML = `
+    <td><input type="date" id="bed-date" value="${e.date}" style="${st};width:130px"></td>
+    <td><select id="bed-category" style="${st}">${businessCategoryOptionsHtml(e.category)}</select></td>
+    <td><input type="text" id="bed-desc" value="${escHtml(e.description)}" style="${st};width:180px"></td>
+    <td><input type="number" id="bed-amount" value="${e.amount}" min="0" step="0.01" style="${st};width:100px"></td>
+    <td style="display:flex;gap:6px">
+      <button class="btn btn-primary btn-sm" onclick="saveBusinessExpense('${id}')">Save</button>
+      <button class="btn btn-ghost btn-sm" onclick="renderAccounting()">Cancel</button>
+    </td>`;
+}
+function saveBusinessExpense(id) {
+  const e = state.businessExpenses.find(x => x.id === id);
+  if (!e) return;
+  const date = document.getElementById('bed-date').value;
+  const amount = parseFloat(document.getElementById('bed-amount').value);
+  if (!date) { alert('Pick a date.'); return; }
+  if (!amount || amount <= 0) { alert('Enter a valid amount.'); return; }
+  e.date = date;
+  e.category = document.getElementById('bed-category').value;
+  e.description = document.getElementById('bed-desc').value.trim();
+  e.amount = amount;
+  save(); odAutoSave();
+  renderAccounting();
+}
+
+// Optional AGI inputs are stored per tax year.
+function saveAccountingYearInputs() {
+  const year = document.getElementById('acctYear').value;
+  if (!state.accountingYears) state.accountingYears = {};
+  state.accountingYears[year] = {
+    otherIncome: parseFloat(document.getElementById('acctOtherIncome').value) || 0,
+    otherAdjustments: parseFloat(document.getElementById('acctOtherAdjustments').value) || 0
+  };
+  save(); odAutoSave();
+  renderAccounting();
+}
+
+// Year's books as a CSV for the accountant.
+function exportAccountingCSV() {
+  const a = buildAccounting(document.getElementById('acctYear').value);
+  const rows = [[`Cirrobound Solutions - Accounting ${a.year} (cash basis)`], [],
+    ['1. REVENUE - DEPOSITS'], ['Date Received', 'Invoice #', 'From', 'Amount ($)']];
+  a.deposits.forEach(r => rows.push([invoicePaidDateStr(r), r.invoiceNum, r.clientName, invoiceRecordTotal(r).toFixed(2)]));
+  rows.push(['', '', 'Total deposits', a.revenue.toFixed(2)], [],
+    ['2. BUSINESS EXPENSES'], ['Date', 'Category', 'Description', 'Amount ($)', 'Deductible ($)']);
+  [...a.expenses].reverse().forEach(e => rows.push([e.date, e.category, e.description || '', e.amount.toFixed(2), (e.amount * deductiblePct(e.category)).toFixed(2)]));
+  rows.push(['', '', 'Total', a.spent.toFixed(2), a.deductible.toFixed(2)], [],
+    ['3. AGI'],
+    ['Net profit', a.netProfit.toFixed(2)],
+    ['Self-employment tax (est.)', a.seTax.toFixed(2)],
+    ['Deductible half of SE tax', a.seTaxHalf.toFixed(2)],
+    ['Business income', a.businessIncome.toFixed(2)],
+    ['Other income', a.otherIncome.toFixed(2)],
+    ['Other adjustments', a.otherAdjustments.toFixed(2)],
+    ['Adjusted Gross Income (est.)', a.agi.toFixed(2)]);
+  const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  link.download = `cirrobound-accounting-${a.year}.csv`;
+  link.click();
 }
 
 // ── Summary ────────────────────────────────────────────
@@ -4469,7 +4803,7 @@ function updateSyncUI() {
     // Customers/Retainers/Projects/Expenses/Invoice History are Taylor's
     // business-management views (billing, invoicing, client records) —
     // teammates only ever need Time Tracking to log their own hours.
-    ['tabCustomers', 'tabRetainers', 'tabProjects', 'tabExpenses', 'tabInvoiceHistory'].forEach(id => {
+    ['tabCustomers', 'tabRetainers', 'tabProjects', 'tabExpenses', 'tabInvoiceHistory', 'tabAccounting'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.style.display = isManager() ? '' : 'none';
     });
