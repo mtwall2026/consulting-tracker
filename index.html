@@ -844,6 +844,25 @@
     <div id="acctAgi"></div>
   </div>
 
+  <!-- Business Info: the address/phone printed in every invoice header.
+       Kept in your synced data (behind sign-in), never in this public code. -->
+  <div class="card">
+    <h2>Business Info</h2>
+    <p style="color:var(--muted);font-size:0.85rem;margin-top:-8px">Printed in the header of every invoice and statement. Saved to your OneDrive with the rest of your data.</p>
+    <div id="businessInfoWarning" style="display:none;background:#3a2e12;border:1px solid #b8860b;color:#fbbf24;border-radius:6px;padding:8px 12px;font-size:0.85rem;margin-bottom:12px">
+      No address saved yet &mdash; invoices will print without one until you add it.
+    </div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:0.8rem;color:var(--muted)">Address <span style="font-size:0.75rem">(one line per row)</span>
+        <textarea id="businessInfoAddress" rows="3" placeholder="123 Main St&#10;Anytown, ST 12345&#10;United States" style="width:260px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px;font-family:inherit"></textarea>
+      </label>
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:0.8rem;color:var(--muted)">Mobile
+        <input type="text" id="businessInfoPhone" placeholder="555-555-0100" style="width:160px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px" />
+      </label>
+      <button class="btn btn-primary" onclick="saveBusinessInfo()">Save</button>
+    </div>
+  </div>
+
   </div> <!-- /viewAccounting -->
 
 </div>
@@ -944,6 +963,8 @@ function migrateState(s) {
   // Accounting tab: Cirrobound's own expenses, and per-year AGI inputs
   if (!s.businessExpenses) s.businessExpenses = [];
   if (!s.accountingYears) s.accountingYears = {};
+  // Address/phone for the invoice header (Accounting tab > Business Info)
+  if (!s.businessInfo) s.businessInfo = { address: '', phone: '' };
   return s;
 }
 function defaultState() {
@@ -955,6 +976,7 @@ function defaultState() {
     projects: [],
     businessExpenses: [],
     accountingYears: {},
+    businessInfo: { address: '', phone: '' },
     nextInvoiceNum: 1001
   };
 }
@@ -1916,6 +1938,7 @@ function renderAccounting() {
         (c.deductible !== c.spent ? ' ' + muted(`(${fmtMoney(c.spent)} spent, 50% deductible)`) : ''),
         '&minus;' + fmtMoney(c.deductible), { indent: true })).join('')
     : line(muted('No expenses yet'), fmtMoney(0), { indent: true });
+  renderBusinessInfo();
   document.getElementById('acctAgi').innerHTML = `
     <table>
       <tbody>
@@ -1988,6 +2011,25 @@ function saveBusinessExpense(id) {
   e.amount = amount;
   save(); odAutoSave();
   renderAccounting();
+}
+
+// Business Info card: show what's saved; warn while the address is blank.
+// Skips refilling a field you're typing in, so a re-render can't wipe it.
+function renderBusinessInfo() {
+  const info = state.businessInfo || {};
+  const addr = document.getElementById('businessInfoAddress');
+  const phone = document.getElementById('businessInfoPhone');
+  if (document.activeElement !== addr) addr.value = info.address || '';
+  if (document.activeElement !== phone) phone.value = info.phone || '';
+  document.getElementById('businessInfoWarning').style.display = (info.address || '').trim() ? 'none' : '';
+}
+function saveBusinessInfo() {
+  state.businessInfo = {
+    address: document.getElementById('businessInfoAddress').value.trim(),
+    phone: document.getElementById('businessInfoPhone').value.trim()
+  };
+  save(); odAutoSave();
+  renderBusinessInfo();
 }
 
 // Optional AGI inputs are stored per tax year.
@@ -3345,6 +3387,15 @@ const INVOICE_STYLE = `
     .preview-banner button { background: #fff; color: #b8860b; border: none; border-radius: 4px; padding: 4px 12px; font-weight: 700; cursor: pointer; }
     @media print { body { padding: 20px; } }`;
 
+// Address + mobile for the invoice header, from state.businessInfo (set on
+// the Accounting tab). Left out entirely if not filled in yet.
+function businessInfoHeaderLines() {
+  const info = state.businessInfo || {};
+  const lines = (info.address || '').split('\n').map(l => l.trim()).filter(Boolean);
+  return (lines.length ? `<p>${lines.map(escHtml).join('<br>')}</p>` : '') +
+    (info.phone ? `<p style="margin-top:6px">Mobile: ${escHtml(info.phone)}</p>` : '');
+}
+
 function invoiceHeaderHtml(docLabel) {
   return `
   <div class="invoice-header">
@@ -3352,8 +3403,7 @@ function invoiceHeaderHtml(docLabel) {
     <div class="company">
       <div class="doc-title">${docLabel || 'Invoice'}</div>
       <h2>Cirrobound Solutions LLC</h2>
-      <p>1012 Oak Glen Court<br>Spartanburg, South Carolina 29303<br>United States</p>
-      <p style="margin-top:6px">Mobile: 864-381-7793</p>
+      ${businessInfoHeaderLines()}
     </div>
   </div>
   <div class="doc-divider"></div>`;
