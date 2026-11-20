@@ -826,10 +826,16 @@
         <input type="date" id="bizExpDate" />
       </label>
       <label>Category
-        <select id="bizExpCategory"></select>
+        <select id="bizExpCategory" onchange="updateBizExpPctField()"></select>
       </label>
       <label>Amount
-        <input type="number" id="bizExpAmount" placeholder="0.00" min="0" step="0.01" style="width:100px" />
+        <input type="number" id="bizExpAmount" placeholder="0.00" min="0" step="0.01" style="width:100px" oninput="updateBizExpPctField()" />
+      </label>
+      <!-- Internet only: the full bill goes in Amount, and this month's
+           business-use % decides how much of it counts as an expense. -->
+      <label id="bizExpPctField" style="display:none">Business use %
+        <input type="number" id="bizExpBusinessPct" placeholder="e.g. 60" min="0" max="100" step="1" style="width:80px" oninput="updateBizExpPctField()" />
+        <span id="bizExpPctNote" style="font-size:0.75rem;color:var(--muted)"></span>
       </label>
       <label>Description
         <input id="bizExpDescription" placeholder="What it was for" style="width:200px" />
@@ -839,11 +845,7 @@
       </label>
       <button class="btn btn-primary" onclick="addBusinessExpense()" style="align-self:flex-end">+ Add Expense</button>
     </div>
-    <div style="margin-top:14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:0.85rem;color:var(--muted)">
-      <span>Internet business use for <span id="internetRuleYear"></span>:</span>
-      <input type="number" id="internetBusinessPct" min="0" max="100" step="1" placeholder="&mdash;" onchange="saveInternetBusinessPct()" style="width:70px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:4px 8px" /> %
-      <span>&mdash; only this share of Internet expenses is deducted.</span>
-    </div>
+    <p style="margin:10px 0 0;font-size:0.8rem;color:var(--muted)">Internet: enter the full bill as the amount and that month's business-use %; only that share counts as an expense.</p>
     <div id="internetRuleWarning" style="display:none;background:#3a2e12;border:1px solid #b8860b;color:#fbbf24;border-radius:6px;padding:8px 12px;font-size:0.85rem;margin-top:8px"></div>
     <div id="acctExpenses" class="table-scroll" style="margin-top:14px"></div>
   </div>
@@ -987,7 +989,13 @@ function migrateState(s) {
   // and 'Internet' (business-use %). Older entries keep their 100% share.
   s.businessExpenses.forEach(e => {
     if (e.category === 'Utilities, Phone & Internet') e.category = 'Utilities & Phone';
+    // The Internet % used to be one number per year; it is now on each
+    // bill. Bills without their own % take their year's old setting.
+    const yearPct = ((s.accountingYears[(e.date || '').slice(0, 4)] || {}).internetBusinessPct);
+    if (e.category === 'Internet' && typeof e.businessPct !== 'number' && typeof yearPct === 'number') e.businessPct = yearPct;
   });
+  // The per-year setting has been copied onto its bills and is no longer used
+  Object.values(s.accountingYears).forEach(y => { if (y) delete y.internetBusinessPct; });
   return s;
 }
 function defaultState() {
@@ -1852,23 +1860,28 @@ function businessCategoryOptionsHtml(selected) {
 }
 
 // Internet business-use rule: home internet is used for both work and
-// personal life, so only the business-use share is deductible. Taylor sets
-// that share per tax year (state.accountingYears[year].internetBusinessPct).
-// Returns the % (0-100), or null when not set for that year.
-function internetBusinessPct(year) {
-  const v = ((state.accountingYears || {})[year] || {}).internetBusinessPct;
-  return typeof v === 'number' ? v : null;
+// personal life, so only the business-use share is deductible. Each
+// Internet bill is entered in full with that month's business-use %
+// (expense.businessPct, 0-100). Returns the %, or null when not set.
+function internetPctOf(e) {
+  return typeof e.businessPct === 'number' ? e.businessPct : null;
 }
 
-// Share of an expense that counts as deductible, for the given tax year:
-// meals 50%, Internet its business-use % (100% until set), all else 100%.
-function deductiblePct(category, year) {
-  if (/^Meals/.test(category || '')) return 0.5;
-  if (category === 'Internet') {
-    const pct = internetBusinessPct(year);
+// Share of one expense that counts as deductible: meals 50%, Internet its
+// own business-use % (100% until set, with a warning), all else 100%.
+function deductiblePct(e) {
+  if (/^Meals/.test(e.category || '')) return 0.5;
+  if (e.category === 'Internet') {
+    const pct = internetPctOf(e);
     return pct === null ? 1 : pct / 100;
   }
   return 1;
+}
+// Reads a business-use % box: a number 0-100, or null if blank/invalid.
+function readPctInput(el) {
+  const raw = el.value.trim();
+  const n = parseFloat(raw);
+  return raw === '' || isNaN(n) || n < 0 || n > 100 ? null : n;
 }
 // 0.6 -> "60%", 1/3 -> "33.3%"
 function fmtPct(fraction) { return `${Math.round(fraction * 1000) / 10}%`; }
@@ -1901,7 +1914,7 @@ function buildAccounting(year) {
   expenses.forEach(e => {
     if (!byCat[e.category]) byCat[e.category] = { category: e.category, spent: 0, deductible: 0 };
     byCat[e.category].spent += e.amount;
-    byCat[e.category].deductible += e.amount * deductiblePct(e.category, year);
+    byCat[e.category].deductible += e.amount * deductiblePct(e);
   });
   const categories = Object.values(byCat).sort((a, b) => b.deductible - a.deductible);
   const spent = categories.reduce((sum, c) => sum + c.spent, 0);
@@ -1978,8 +1991,7 @@ function renderAccounting() {
         ${a.expenses.map(e => `
           <tr data-bizexpid="${e.id}">
             <td>${fmtDate(e.date)}</td>
-            <td>${escHtml(e.category)}${e.category === 'Internet'
-              ? ' ' + muted(`(${fmtPct(deductiblePct('Internet', a.year))} business)`) : ''}</td>
+            <td>${escHtml(e.category)}${e.category === 'Internet' ? ' ' + internetRowNote(e) : ''}</td>
             <td>${escHtml(e.description) || muted('&mdash;')}</td>
             <td class="amount" style="text-align:right">${fmtMoney(e.amount)}</td>
             <td data-receipt-cell>${receiptCellHtml(e)}</td>
@@ -2033,11 +2045,20 @@ async function addBusinessExpense() {
   if (!amount || amount <= 0) { alert('Enter a valid amount.'); return; }
   // Receipts upload to OneDrive, which needs a sign-in - check before
   // saving anything so an expense is never half-added.
+  // Internet bills need that month's business-use %
+  const pctInput = document.getElementById('bizExpBusinessPct');
+  const businessPct = category === 'Internet' ? readPctInput(pctInput) : null;
+  if (category === 'Internet' && businessPct === null) {
+    alert('Enter the business-use % for this internet bill (0 to 100).'); pctInput.focus(); return;
+  }
   if (receiptFile && !odAccount) { alert('Please sign in to attach a receipt.'); return; }
   const expense = { id: uid(), date, category, amount, description };
+  if (businessPct !== null) expense.businessPct = businessPct;
   state.businessExpenses.unshift(expense);
   document.getElementById('bizExpAmount').value = '';
   document.getElementById('bizExpDescription').value = '';
+  pctInput.value = '';
+  updateBizExpPctField();
   receiptInput.value = '';
   // Jump the page to the year just entered so the new expense is visible
   document.getElementById('acctYear').value = date.slice(0, 4);
@@ -2162,7 +2183,10 @@ function editBusinessExpense(id) {
   const st = 'background:var(--surface2);border:1px solid var(--border);border-radius:5px;color:var(--text);padding:4px 6px;font-size:0.82rem';
   tr.innerHTML = `
     <td><input type="date" id="bed-date" value="${e.date}" style="${st};width:130px"></td>
-    <td><select id="bed-category" style="${st}">${businessCategoryOptionsHtml(e.category)}</select></td>
+    <td><select id="bed-category" style="${st}" onchange="document.getElementById('bed-pct-wrap').style.display = this.value === 'Internet' ? '' : 'none'">${businessCategoryOptionsHtml(e.category)}</select>
+      <span id="bed-pct-wrap" style="display:${e.category === 'Internet' ? '' : 'none'};white-space:nowrap">
+        <input type="number" id="bed-pct" value="${internetPctOf(e) === null ? '' : internetPctOf(e)}" min="0" max="100" step="1" placeholder="%" title="Business-use % for this bill" style="${st};width:60px;margin-top:4px"> % business
+      </span></td>
     <td><input type="text" id="bed-desc" value="${escHtml(e.description)}" style="${st};width:180px"></td>
     <td><input type="number" id="bed-amount" value="${e.amount}" min="0" step="0.01" style="${st};width:100px"></td>
     <td data-receipt-cell>${receiptCellHtml(e)}</td>
@@ -2178,10 +2202,15 @@ function saveBusinessExpense(id) {
   const amount = parseFloat(document.getElementById('bed-amount').value);
   if (!date) { alert('Pick a date.'); return; }
   if (!amount || amount <= 0) { alert('Enter a valid amount.'); return; }
+  const category = document.getElementById('bed-category').value;
+  const businessPct = category === 'Internet' ? readPctInput(document.getElementById('bed-pct')) : null;
+  if (category === 'Internet' && businessPct === null) { alert('Enter the business-use % for this internet bill (0 to 100).'); return; }
   e.date = date;
-  e.category = document.getElementById('bed-category').value;
+  e.category = category;
   e.description = document.getElementById('bed-desc').value.trim();
   e.amount = amount;
+  // Only Internet bills carry a business-use %
+  if (businessPct !== null) e.businessPct = businessPct; else delete e.businessPct;
   save(); odAutoSave();
   renderAccounting();
 }
@@ -2205,34 +2234,30 @@ function saveBusinessInfo() {
   renderBusinessInfo();
 }
 
-// Internet rule row: this year's %, and a warning while Internet
-// expenses exist for the year but no % has been set (counted at 100%).
-function renderInternetRule(a) {
-  const pct = internetBusinessPct(a.year);
-  const input = document.getElementById('internetBusinessPct');
-  if (document.activeElement !== input) input.value = pct === null ? '' : pct;
-  document.getElementById('internetRuleYear').textContent = a.year;
-  const hasInternet = a.expenses.some(e => e.category === 'Internet');
-  const warn = document.getElementById('internetRuleWarning');
-  warn.style.display = hasInternet && pct === null ? '' : 'none';
-  warn.textContent = `No internet business-use % set for ${a.year} \u2014 Internet expenses are counted at 100% until you set it.`;
+// Category-cell note on an Internet row: its % and the part that counts,
+// or a warning when the bill has no % yet.
+function internetRowNote(e) {
+  const pct = internetPctOf(e);
+  if (pct === null) return '<span style="color:#fbbf24;font-size:0.8rem">(no business % &mdash; counted at 100%)</span>';
+  return `<span style="color:var(--muted);font-size:0.8rem">(${pct}% business &mdash; ${fmtMoney(e.amount * pct / 100)} counts)</span>`;
 }
-function saveInternetBusinessPct() {
-  const year = document.getElementById('acctYear').value;
-  const raw = document.getElementById('internetBusinessPct').value.trim();
-  if (!state.accountingYears) state.accountingYears = {};
-  // Copy, so the year's other inputs (other income/adjustments) are kept
-  const yr = { ...(state.accountingYears[year] || {}) };
-  if (raw === '') {
-    delete yr.internetBusinessPct;
-  } else {
-    const n = parseFloat(raw);
-    if (isNaN(n) || n < 0 || n > 100) { alert('Enter a percentage from 0 to 100.'); renderAccounting(); return; }
-    yr.internetBusinessPct = n;
-  }
-  state.accountingYears[year] = yr;
-  save(); odAutoSave();
-  renderAccounting();
+
+// Warning while any of the year's Internet bills has no business-use %.
+function renderInternetRule(a) {
+  const missing = a.expenses.filter(e => e.category === 'Internet' && internetPctOf(e) === null).length;
+  const warn = document.getElementById('internetRuleWarning');
+  warn.style.display = missing ? '' : 'none';
+  warn.textContent = `${missing} Internet bill${missing === 1 ? ' has' : 's have'} no business-use % \u2014 counted at 100% until you Edit ${missing === 1 ? 'it' : 'them'} and add the %.`;
+}
+
+// Add form: show the % box only for Internet, with what will count.
+function updateBizExpPctField() {
+  const isInternet = document.getElementById('bizExpCategory').value === 'Internet';
+  document.getElementById('bizExpPctField').style.display = isInternet ? '' : 'none';
+  const amount = parseFloat(document.getElementById('bizExpAmount').value);
+  const pct = readPctInput(document.getElementById('bizExpBusinessPct'));
+  document.getElementById('bizExpPctNote').textContent =
+    isInternet && amount > 0 && pct !== null ? `= ${fmtMoney(amount * pct / 100)} counts` : '';
 }
 
 // Optional AGI inputs are stored per tax year.
@@ -2256,7 +2281,7 @@ function exportAccountingCSV() {
   a.deposits.forEach(r => rows.push([invoicePaidDateStr(r), r.invoiceNum, r.clientName, invoiceRecordTotal(r).toFixed(2)]));
   rows.push(['', '', 'Total deposits', a.revenue.toFixed(2)], [],
     ['2. BUSINESS EXPENSES'], ['Date', 'Category', 'Description', 'Amount ($)', 'Deductible ($)', 'Receipt']);
-  [...a.expenses].reverse().forEach(e => rows.push([e.date, e.category, e.description || '', e.amount.toFixed(2), (e.amount * deductiblePct(e.category, a.year)).toFixed(2), e.receipt ? e.receipt.fileName : '']));
+  [...a.expenses].reverse().forEach(e => rows.push([e.date, e.category, e.description || '', e.amount.toFixed(2), (e.amount * deductiblePct(e)).toFixed(2), e.receipt ? e.receipt.fileName : '']));
   rows.push(['', '', 'Total', a.spent.toFixed(2), a.deductible.toFixed(2)], [],
     ['3. AGI'],
     ['Net profit', a.netProfit.toFixed(2)],
