@@ -109,16 +109,6 @@
     /* Wide tables scroll inside their card rather than pushing the row's
        buttons off the edge of the page. */
     .table-scroll { overflow-x: auto; }
-    /* Address suggestions under a trip's From / To box. Fixed to the page so
-       a scrolling table can't clip it. */
-    #addrSuggest { position: fixed; z-index: 2000; display: none; max-height: 280px; overflow-y: auto;
-      background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.45); font-size: 0.85rem; }
-    #addrSuggest .addr-item { display: block; width: 100%; text-align: left; background: none; border: 0;
-      color: var(--text); padding: 7px 10px; cursor: pointer; font: inherit; }
-    #addrSuggest .addr-item.active, #addrSuggest .addr-item:hover { background: rgba(255,255,255,0.08); }
-    #addrSuggest .addr-head { padding: 6px 10px 2px; font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
-    #addrSuggest .addr-note { padding: 6px 10px; color: var(--muted); }
     .manual-row label { display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; color: var(--muted); }
     .manual-row input, .manual-row select, .manual-row textarea {
       background: var(--surface2);
@@ -843,10 +833,10 @@
            log), and business miles x the mileage rate is the expense, so
            Amount is hidden and worked out from these. -->
       <label id="bizExpFromField" style="display:none">From
-        <input id="bizExpFrom" placeholder="Start typing an address" autocomplete="off" style="width:190px" />
+        <input id="bizExpFrom" placeholder="e.g. Home office or 123 Main St, City, ST 12345" style="width:220px" />
       </label>
       <label id="bizExpToField" style="display:none">To
-        <input id="bizExpTo" placeholder="Start typing an address" autocomplete="off" style="width:220px" />
+        <input id="bizExpTo" placeholder="e.g. 456 Oak Ave, City, ST 12345 &rarr; back" style="width:240px" />
       </label>
       <label id="bizExpMilesField" style="display:none">Miles
         <input type="number" id="bizExpMiles" placeholder="0" min="0" step="0.1" style="width:80px" oninput="updateBizExpFields()" />
@@ -870,7 +860,7 @@
       <button class="btn btn-primary" onclick="addBusinessExpense()" style="align-self:flex-end">+ Add Expense</button>
     </div>
     <p style="margin:10px 0 0;font-size:0.8rem;color:var(--muted)">Internet: enter the full bill as the amount and that month's business-use %; only that share counts as an expense.</p>
-    <p style="margin:4px 0 0;font-size:0.8rem;color:var(--muted)">Car &amp; Mileage: enter where you drove from and to, the total business miles, and the purpose; the miles count at the mileage rate. For several stops, list them in To separated by &rarr; (e.g. "Client A office &rarr; Client B office &rarr; back"); type "-&gt;" and it becomes &rarr;. Addresses are suggested as you type: first places you've used before, then matches from OpenStreetMap (what you type is sent to photon.komoot.io to search). The rate covers gas and other running costs, so don't also enter gas for the same car. Parking and tolls can still go in on their own.</p>
+    <p style="margin:4px 0 0;font-size:0.8rem;color:var(--muted)">Car &amp; Mileage: enter where you drove from and to, the total business miles, and the purpose; the miles count at the mileage rate. For several stops, list them in To separated by &rarr; (e.g. "Client A office &rarr; Client B office &rarr; back"); type "-&gt;" and it becomes &rarr;. Type an address any way (e.g. "123 main st houston tx 77002") and it's tidied into the standard form "123 Main St, Houston, TX 77002" when you leave the box; a name like "Home office" is left as you typed it. The rate covers gas and other running costs, so don't also enter gas for the same car. Parking and tolls can still go in on their own.</p>
     <div id="internetRuleWarning" style="display:none;background:#3a2e12;border:1px solid #b8860b;color:#fbbf24;border-radius:6px;padding:8px 12px;font-size:0.85rem;margin-top:8px"></div>
     <div id="acctExpenses" class="table-scroll" style="margin-top:14px"></div>
     <div class="export-row" style="margin-top:14px">
@@ -1207,9 +1197,9 @@ function init() {
   document.getElementById('expenseDate').value = localDateStr(now);
   document.getElementById('bizExpDate').value = localDateStr(now);
   document.getElementById('bizExpCategory').innerHTML = businessCategoryOptionsHtml();
-  // Trip From / To boxes suggest addresses as you type
-  attachAddressLookup(document.getElementById('bizExpFrom'));
-  attachAddressLookup(document.getElementById('bizExpTo'), { multiStop: true });
+  // Trip From / To boxes tidy typed addresses into the standard format
+  attachAddressFormat(document.getElementById('bizExpFrom'));
+  attachAddressFormat(document.getElementById('bizExpTo'));
 
   // Month filter starts on All
   document.getElementById('filterMonth').value = '';
@@ -1907,156 +1897,155 @@ const isMileage = e => e.category === MILEAGE_CATEGORY && typeof e.miles === 'nu
 function mileageAmount(miles, rate) { return Math.round(miles * rate * 100) / 100; }
 // Reads a positive number box, or null
 function readPositive(el) { const n = parseFloat(el.value); return n > 0 ? n : null; }
-// -- Address lookup for a trip's From / To ------------------------------
-// As you type, a list drops down under the box: first places used on
-// earlier trips (instant, from this app's own data), then real addresses
-// from OpenStreetMap via the free Photon search service (no key needed).
-// Arrow keys + Enter or a click picks one; Esc closes the list. In To,
-// stops are separated by "->" / an arrow, and only the stop being typed is
-// looked up and replaced, so a multi-stop trip can be built stop by stop.
-const ADDR_SEARCH_URL = 'https://photon.komoot.io/api/';
+// -- Address formatting for a trip's From / To ---------------------------
+// No lookup: whatever is typed is tidied into the standard US form
+// "123 Main St Ste 200, Houston, TX 77002" when you leave the box (and
+// again on save). Street types, directions and units are abbreviated the
+// USPS way, words get capitals, the state becomes its two letters and
+// commas go between street, city and "ST ZIP". Text that doesn't look like
+// an address (no house number, state or ZIP - e.g. "Home office") is kept
+// as typed. In To, stops are separated by an arrow; "->" becomes one and
+// each stop is tidied on its own.
 const ARROW = ' → ';
-let addrBox = null;          // the shared suggestion list (one on the page)
-let addrBias = null;         // [lon, lat] of the last address picked - nearby results first
+const STREET_TYPES = {
+  street: 'St', st: 'St', str: 'St', avenue: 'Ave', ave: 'Ave', av: 'Ave', boulevard: 'Blvd', blvd: 'Blvd',
+  road: 'Rd', rd: 'Rd', drive: 'Dr', dr: 'Dr', lane: 'Ln', ln: 'Ln', court: 'Ct', ct: 'Ct',
+  parkway: 'Pkwy', pkwy: 'Pkwy', pky: 'Pkwy', highway: 'Hwy', hwy: 'Hwy', freeway: 'Fwy', fwy: 'Fwy',
+  expressway: 'Expy', expy: 'Expy', place: 'Pl', pl: 'Pl', terrace: 'Ter', ter: 'Ter', circle: 'Cir', cir: 'Cir',
+  way: 'Way', trail: 'Trl', trl: 'Trl', square: 'Sq', sq: 'Sq', loop: 'Loop', plaza: 'Plz', plz: 'Plz',
+  crossing: 'Xing', xing: 'Xing', point: 'Pt', pt: 'Pt', pike: 'Pike', alley: 'Aly', aly: 'Aly', path: 'Path',
+  center: 'Ctr', ctr: 'Ctr', cove: 'Cv', cv: 'Cv', creek: 'Crk', crk: 'Crk', heights: 'Hts', hts: 'Hts',
+  route: 'Rte', rte: 'Rte', run: 'Run', walk: 'Walk', row: 'Row', bend: 'Bnd', bnd: 'Bnd', ridge: 'Rdg', rdg: 'Rdg'
+};
+const DIRECTIONS = { n: 'N', s: 'S', e: 'E', w: 'W', ne: 'NE', nw: 'NW', se: 'SE', sw: 'SW',
+  north: 'N', south: 'S', east: 'E', west: 'W', northeast: 'NE', northwest: 'NW', southeast: 'SE', southwest: 'SW' };
+const UNIT_TYPES = { suite: 'Ste', ste: 'Ste', apartment: 'Apt', apt: 'Apt', unit: 'Unit', building: 'Bldg',
+  bldg: 'Bldg', floor: 'Fl', fl: 'Fl', room: 'Rm', rm: 'Rm', dept: 'Dept', department: 'Dept' };
+// Road-name prefixes that stay in capitals (FM 1960, CR 12, US 59, ...)
+const ROAD_CAPS = new Set(['fm', 'rm', 'cr', 'sh', 'us', 'ih', 'sr', 'po']);
+const US_STATES = {
+  alabama: 'AL', alaska: 'AK', arizona: 'AZ', arkansas: 'AR', california: 'CA', colorado: 'CO',
+  connecticut: 'CT', delaware: 'DE', 'district of columbia': 'DC', florida: 'FL', georgia: 'GA',
+  hawaii: 'HI', idaho: 'ID', illinois: 'IL', indiana: 'IN', iowa: 'IA', kansas: 'KS', kentucky: 'KY',
+  louisiana: 'LA', maine: 'ME', maryland: 'MD', massachusetts: 'MA', michigan: 'MI', minnesota: 'MN',
+  mississippi: 'MS', missouri: 'MO', montana: 'MT', nebraska: 'NE', nevada: 'NV', 'new hampshire': 'NH',
+  'new jersey': 'NJ', 'new mexico': 'NM', 'new york': 'NY', 'north carolina': 'NC', 'north dakota': 'ND',
+  ohio: 'OH', oklahoma: 'OK', oregon: 'OR', pennsylvania: 'PA', 'rhode island': 'RI',
+  'south carolina': 'SC', 'south dakota': 'SD', tennessee: 'TN', texas: 'TX', utah: 'UT', vermont: 'VT',
+  virginia: 'VA', washington: 'WA', 'west virginia': 'WV', wisconsin: 'WI', wyoming: 'WY', 'puerto rico': 'PR'
+};
+const STATE_CODES = new Set(Object.values(US_STATES));
+const clean = w => w.replace(/\.$/, '').toLowerCase();   // "St." -> "st"
 
-// Places from earlier trips: every From, and every stop in every To
-function usedTripPlaces() {
-  const seen = new Map();
-  (state.businessExpenses || []).filter(isMileage).forEach(e => {
-    [e.from, ...String(e.to || '').split(/\s*(?:→|->)\s*/)].forEach(p => {
-      const t = (p || '').trim();
-      if (t && t.toLowerCase() !== 'back' && !seen.has(t.toLowerCase())) seen.set(t.toLowerCase(), t);
-    });
-  });
-  return [...seen.values()];
+// One word with capitals: "main" -> "Main", "o'neil" -> "O'Neil", "5th" stays,
+// "12b" -> "12B". keepCaps leaves a short all-capitals word (e.g. "IBM") alone.
+function capWord(w, keepCaps) {
+  if (/^\d+(st|nd|rd|th)$/i.test(w)) return w.toLowerCase();
+  if (/\d/.test(w)) return w.toUpperCase();
+  if (keepCaps && w.length <= 4 && w === w.toUpperCase()) return w;
+  if (ROAD_CAPS.has(w.toLowerCase())) return w.toUpperCase();
+  return w.toLowerCase()
+    .replace(/(^|[-\/])([a-z])/g, (m, a, b) => a + b.toUpperCase())
+    .replace(/^([a-z])'([a-z])/i, (m, a, b) => a.toUpperCase() + "'" + b.toUpperCase());
 }
 
-// One OpenStreetMap result as a readable one-line address
-function formatPlace(props) {
-  const street = [props.housenumber, props.street].filter(Boolean).join(' ');
-  const region = [props.state, props.postcode].filter(Boolean).join(' ');
-  const parts = [];
-  // A named place (business, building) leads, unless the name is just the street
-  if (props.name && props.name !== street && props.name !== props.street) parts.push(props.name);
-  if (street) parts.push(street);
-  [props.city || props.town || props.district, region, props.countrycode && props.countrycode !== 'US' ? props.country : '']
-    .forEach(x => { if (x && !parts.includes(x)) parts.push(x); });
-  return parts.join(', ');
+// The street part: number, name, street type, direction, unit
+function formatStreet(words, keepCaps) {
+  return words.map((w, i) => {
+    const c = clean(w);
+    const next = words[i + 1] ? clean(words[i + 1]) : '';
+    if (w.startsWith('#')) return '#' + w.slice(1).toUpperCase();
+    if (UNIT_TYPES[c] && i > 0) return UNIT_TYPES[c];
+    // "N Main St" -> N, but "123 North St" keeps North as the name
+    if (DIRECTIONS[c] && i > 0 && !STREET_TYPES[next]) return DIRECTIONS[c];
+    // A street type after the name ("123 Main St"), not as the name itself
+    if (STREET_TYPES[c] && i > 1) return STREET_TYPES[c];
+    return capWord(w, keepCaps);
+  }).join(' ');
 }
 
-// Wires one text box up to the lookup (safe to call again on a new box)
-function attachAddressLookup(input, opts = {}) {
-  if (!input) return;
-  if (!addrBox) {
-    addrBox = document.createElement('div');
-    addrBox.id = 'addrSuggest';
-    // mousedown (not click) so the box doesn't lose focus and close first
-    addrBox.addEventListener('mousedown', ev => {
-      const item = ev.target.closest('.addr-item');
-      ev.preventDefault();
-      if (item && addrBox._pick) addrBox._pick(+item.dataset.i);
-    });
-    document.body.appendChild(addrBox);
-    // The list is placed on the page, so close it rather than leave it behind
-    window.addEventListener('scroll', () => hideAddrBox(), true);
-    window.addEventListener('resize', () => hideAddrBox());
+// Where the street part ends in an address typed without commas: after the
+// first street type (plus any direction and unit that follow it)
+function streetEnd(words) {
+  for (let i = 2; i < words.length; i++) {
+    if (!STREET_TYPES[clean(words[i])]) continue;
+    let end = i + 1;
+    if (words[end] && DIRECTIONS[clean(words[end])]) end++;
+    if (words[end] && (UNIT_TYPES[clean(words[end])] || words[end].startsWith('#'))) {
+      end += words[end].startsWith('#') && words[end].length > 1 ? 1 : 2;
+    }
+    return Math.min(end, words.length);
   }
-  let timer = null, controller = null, items = [], active = -1, query = '';
-
-  // The part of the box being looked up: in To, only the stop after the last arrow
-  const split = () => {
-    const v = input.value;
-    if (!opts.multiStop) return { prefix: '', part: v };
-    const m = v.match(/^(.*(?:→|->)\s*)([^→]*)$/s);
-    return m ? { prefix: m[1].replace(/\s*(?:→|->)\s*$/, ARROW), part: m[2] } : { prefix: '', part: v };
-  };
-
-  const show = (list, note) => {
-    items = list; active = -1;
-    if (!list.length && !note) { hideAddrBox(); return; }
-    const used = list.filter(x => x.used), found = list.filter(x => !x.used);
-    let html = '', i = 0;
-    const rows = arr => arr.map(x => `<button type="button" class="addr-item" data-i="${list.indexOf(x)}">${escHtml(x.text)}</button>`).join('');
-    if (used.length) html += `<div class="addr-head">Used before</div>${rows(used)}`;
-    if (found.length) html += `<div class="addr-head">Addresses</div>${rows(found)}`;
-    if (note) html += `<div class="addr-note">${escHtml(note)}</div>`;
-    addrBox.innerHTML = html;
-    const r = input.getBoundingClientRect();
-    addrBox.style.left = r.left + 'px';
-    addrBox.style.top = (r.bottom + 2) + 'px';
-    addrBox.style.width = Math.max(r.width, 320) + 'px';
-    addrBox.style.display = 'block';
-    addrBox._owner = input;
-    addrBox._pick = i2 => {
-      const { prefix } = split();
-      input.value = prefix + items[i2].text;
-      if (items[i2].coords) addrBias = items[i2].coords;
-      hideAddrBox();
-      input.focus();
-    };
-  };
-
-  const highlight = n => {
-    const els = addrBox.querySelectorAll('.addr-item');
-    if (!els.length) return;
-    active = (n + els.length) % els.length;
-    els.forEach(el => el.classList.toggle('active', +el.dataset.i === active));
-    const el = addrBox.querySelector(`.addr-item[data-i="${active}"]`);
-    if (el) el.scrollIntoView({ block: 'nearest' });
-  };
-
-  const search = async () => {
-    // Typing "->" turns into an arrow, so stops read cleanly
-    if (opts.multiStop && input.value.includes('->')) {
-      // Keep the cursor the same distance from the end (stops are typed at the end)
-      const fromEnd = input.value.length - input.selectionStart;
-      input.value = input.value.replace(/\s*->\s*/g, ARROW);
-      const pos = Math.max(0, input.value.length - fromEnd);
-      input.setSelectionRange(pos, pos);
-    }
-    const part = split().part.trim();
-    query = part;
-    if (part.length < 3) { hideAddrBox(); return; }
-    const lower = part.toLowerCase();
-    const used = usedTripPlaces().filter(t => t.toLowerCase().includes(lower)).slice(0, 4).map(text => ({ text, used: true }));
-    show(used, 'Searching addresses…');
-    if (controller) controller.abort();
-    controller = new AbortController();
-    try {
-      // Ask for extra, since non-US matches are dropped below
-      const params = new URLSearchParams({ q: part, limit: '20', lang: 'en' });
-      if (addrBias) { params.set('lon', addrBias[0]); params.set('lat', addrBias[1]); }
-      const res = await fetch(ADDR_SEARCH_URL + '?' + params, { signal: controller.signal });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const data = await res.json();
-      if (query !== part || document.activeElement !== input) return;   // typing moved on
-      const seen = new Set(used.map(x => x.text.toLowerCase()));
-      // US addresses only, unless nothing in the US matches
-      let features = data.features || [];
-      const us = features.filter(f => f.properties.countrycode === 'US');
-      if (us.length) features = us;
-      const found = features.slice(0, 7)
-        .map(f => ({ text: formatPlace(f.properties), coords: f.geometry && f.geometry.coordinates }))
-        .filter(x => x.text && !seen.has(x.text.toLowerCase()) && seen.add(x.text.toLowerCase()));
-      show([...used, ...found], found.length || used.length ? '' : 'No matching addresses — you can type it in yourself.');
-    } catch (err) {
-      if (err.name === 'AbortError') return;
-      if (query === part && document.activeElement === input)
-        show(used, 'Address search is unavailable right now — you can type it in yourself.');
-    }
-  };
-
-  input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(search, 300); });
-  input.addEventListener('keydown', ev => {
-    if (addrBox.style.display !== 'block' || addrBox._owner !== input) return;
-    if (ev.key === 'ArrowDown') { ev.preventDefault(); highlight(active + 1); }
-    else if (ev.key === 'ArrowUp') { ev.preventDefault(); highlight(active - 1); }
-    else if (ev.key === 'Enter' && active >= 0) { ev.preventDefault(); addrBox._pick(active); }
-    else if (ev.key === 'Escape') { hideAddrBox(); }
-  });
-  input.addEventListener('blur', () => setTimeout(() => { if (addrBox._owner === input) hideAddrBox(); }, 150));
+  return words.length;   // no street type: can't tell street from city
 }
-function hideAddrBox() { if (addrBox) { addrBox.style.display = 'none'; addrBox._owner = null; } }
+
+// Tidies one address; anything that doesn't look like one comes back as typed
+function formatUSAddress(raw) {
+  const text = String(raw || '').replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+  const keepCaps = text !== text.toUpperCase();          // typed in mixed case
+  // Words, with each comma kept as its own marker
+  let words = text.replace(/,/g, ' , ').split(' ').filter(Boolean);
+  const dropCommas = () => { while (words.length && words[words.length - 1] === ',') words.pop(); };
+  dropCommas();
+  let zip = '';
+  if (/^\d{5}(-\d{4})?$/.test(words[words.length - 1] || '')) { zip = words.pop(); dropCommas(); }
+  let state = '';
+  for (const n of [3, 2, 1]) {
+    if (words.length <= n) continue;
+    const tail = words.slice(-n);
+    if (tail.includes(',')) continue;
+    const name = tail.map(clean).join(' ');
+    const before = words[words.length - n - 1];
+    const code = n === 1 && STATE_CODES.has(name.toUpperCase()) ? name.toUpperCase() : US_STATES[name];
+    if (!code) continue;
+    // A bare "Ct" or "Washington" could be part of the street or the city -
+    // only take it as the state if a ZIP or comma marks it, it was typed as
+    // capital letters ("TX"), or a city sits between the street and it
+    // ("12 north st fort worth tx" - but not "789 oak ct")
+    const rest = words.slice(0, -n);
+    const cityBefore = !rest.includes(',') && streetEnd(rest) < rest.length;
+    // "Street, City, State" (two commas) - one comma could be "Street, City"
+    const commaState = before === ',' && rest.filter(w => w === ',').length >= 2;
+    if (zip || commaState || cityBefore || (n === 1 && tail[0] === tail[0].toUpperCase() && tail[0].length === 2)) {
+      state = code; words = words.slice(0, -n); dropCommas(); break;
+    }
+  }
+  const looksLikeAddress = /^\d/.test(words[0] || '') || /^p\.?o\.?$/i.test(words[0] || '') || zip || state;
+  if (!looksLikeAddress) return text;
+  // Split at commas if any were typed, else after the street type
+  const parts = [[]];
+  words.forEach(w => (w === ',' ? parts.push([]) : parts[parts.length - 1].push(w)));
+  let street, cityWords;
+  if (parts.length > 1) {
+    street = parts[0];
+    // "123 Main St, Ste 200, Houston" - a unit after the first comma stays with the street
+    let k = 1;
+    while (parts[k] && parts[k][0] && (UNIT_TYPES[clean(parts[k][0])] || parts[k][0].startsWith('#'))) street = street.concat(parts[k++]);
+    cityWords = parts.slice(k).flat();
+  } else {
+    const end = streetEnd(words);
+    street = words.slice(0, end);
+    cityWords = words.slice(end);
+  }
+  return [
+    formatStreet(street, keepCaps),
+    cityWords.map(w => capWord(w, keepCaps)).join(' '),
+    [state, zip].filter(Boolean).join(' ')
+  ].filter(Boolean).join(', ');
+}
+
+// A trip's From / To text: "->" becomes an arrow and each stop is tidied
+function formatTripPlaces(raw) {
+  return String(raw || '').split(/\s*(?:→|->)\s*/)
+    .map(stop => formatUSAddress(stop)).filter(Boolean).join(ARROW);
+}
+
+// Tidies a From / To box when you leave it
+function attachAddressFormat(input) {
+  if (!input) return;
+  input.addEventListener('change', () => { input.value = formatTripPlaces(input.value); });
+}
 
 // "Home office -> Client A office" for a trip, or '' if neither end is set
 function tripRoute(e) {
@@ -2238,8 +2227,8 @@ async function addBusinessExpense() {
   const mileage = category === MILEAGE_CATEGORY;
   const miles = mileage ? readPositive(document.getElementById('bizExpMiles')) : null;
   const mileRate = mileage ? readPositive(document.getElementById('bizExpMileRate')) : null;
-  const from = mileage ? document.getElementById('bizExpFrom').value.trim() : '';
-  const to = mileage ? document.getElementById('bizExpTo').value.trim() : '';
+  const from = mileage ? formatTripPlaces(document.getElementById('bizExpFrom').value) : '';
+  const to = mileage ? formatTripPlaces(document.getElementById('bizExpTo').value) : '';
   if (mileage && (!from || !to)) { alert('Enter where the trip started (From) and where you went (To).'); return; }
   if (mileage && miles === null) { alert('Enter the business miles driven.'); return; }
   if (mileage && mileRate === null) { alert('Enter the mileage rate in dollars per mile (e.g. 0.76).'); return; }
@@ -2262,6 +2251,7 @@ async function addBusinessExpense() {
   document.getElementById('bizExpDescription').value = '';
   pctInput.value = '';
   // The rate and the From place stay for the next trip
+  document.getElementById('bizExpFrom').value = from;
   document.getElementById('bizExpMiles').value = '';
   document.getElementById('bizExpTo').value = '';
   updateBizExpFields();
@@ -2524,8 +2514,8 @@ function editBusinessExpense(id) {
       <button class="btn btn-primary btn-sm" onclick="saveBusinessExpense('${id}')">Save</button>
       <button class="btn btn-ghost btn-sm" onclick="renderAccounting()">Cancel</button>
     </td>`;
-  attachAddressLookup(document.getElementById('bed-from'));
-  attachAddressLookup(document.getElementById('bed-to'), { multiStop: true });
+  attachAddressFormat(document.getElementById('bed-from'));
+  attachAddressFormat(document.getElementById('bed-to'));
 }
 // Edit row: show the % box for Internet, Miles x Rate for Car & Mileage
 // (Amount then follows from them and can't be typed).
@@ -2553,8 +2543,8 @@ function saveBusinessExpense(id) {
   const mileage = category === MILEAGE_CATEGORY;
   const miles = mileage ? readPositive(document.getElementById('bed-miles')) : null;
   const mileRate = mileage ? readPositive(document.getElementById('bed-rate')) : null;
-  const from = mileage ? document.getElementById('bed-from').value.trim() : '';
-  const to = mileage ? document.getElementById('bed-to').value.trim() : '';
+  const from = mileage ? formatTripPlaces(document.getElementById('bed-from').value) : '';
+  const to = mileage ? formatTripPlaces(document.getElementById('bed-to').value) : '';
   if (mileage && (!from || !to)) { alert('Enter where the trip started (From) and where you went (To).'); return; }
   if (mileage && miles === null) { alert('Enter the business miles driven.'); return; }
   if (mileage && mileRate === null) { alert('Enter the mileage rate in dollars per mile (e.g. 0.76).'); return; }
