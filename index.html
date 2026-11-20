@@ -2055,7 +2055,8 @@ async function addBusinessExpense() {
 // ({fileName, driveItemId, webUrl}), never the file itself.
 
 // Receipt cell for one expense row (business or client): View link +
-// Replace, or Attach. readOnly (Team View) shows only the View link.
+// Download + Replace, or Attach. readOnly (Team View) shows only View and
+// Download.
 function receiptCellHtml(e, readOnly) {
   const picker = label => `
     <label class="btn btn-ghost btn-sm" style="cursor:pointer" title="${e.receipt ? 'Replace the receipt' : 'Attach a receipt (photo or PDF)'}">${label}
@@ -2065,8 +2066,46 @@ function receiptCellHtml(e, readOnly) {
   return `<div style="display:flex;gap:4px;align-items:center">
       <a href="${escHtml(e.receipt.webUrl)}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm"
          title="${escHtml(e.receipt.fileName)}" style="color:var(--accent2);text-decoration:none;white-space:nowrap">&#128206; View</a>
+      <button class="btn btn-ghost btn-sm" onclick="downloadReceipt('${e.id}', this)"
+         title="Save ${escHtml(e.receipt.fileName)} to this computer" style="white-space:nowrap">Download</button>
       ${readOnly ? '' : picker('Replace')}
     </div>`;
+}
+
+// Saves one expense's receipt to this computer under its original name.
+// The file is read from OneDrive by its item id; if that fails (e.g. in Team
+// View, where the receipt is in the teammate's OneDrive, not this account's)
+// it is read through its share link instead.
+async function downloadReceipt(id, btn) {
+  const st = activeState();
+  const e = (st.businessExpenses || []).find(x => x.id === id) || (st.expenses || []).find(x => x.id === id);
+  if (!e || !e.receipt) return;
+  if (!odAccount) { alert('Please sign in to download the receipt.'); return; }
+  const label = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Downloading…'; }
+  try {
+    const token = await getOdToken();
+    const get = url => fetch(url, { headers: { Authorization: 'Bearer ' + token } });
+    let res = e.receipt.driveItemId
+      ? await get('https://graph.microsoft.com/v1.0/me/drive/items/' + encodeURIComponent(e.receipt.driveItemId) + '/content')
+      : null;
+    if ((!res || !res.ok) && e.receipt.webUrl) {
+      // Graph "shares" id: "u!" + base64url of the file's link
+      const shareId = 'u!' + btoa(unescape(encodeURIComponent(e.receipt.webUrl)))
+        .replace(/=+$/, '').replace(/\//g, '_').replace(/\+/g, '-');
+      res = await get('https://graph.microsoft.com/v1.0/shares/' + shareId + '/driveItem/content');
+    }
+    if (!res || !res.ok) throw new Error(res ? await res.text() : 'No file reference.');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(await res.blob());
+    a.download = e.receipt.fileName || 'receipt';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  } catch (err) {
+    alert('Receipt download failed: ' + err.message + '\n\nYou can still open it with View and save it from OneDrive.');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = label; }
+  }
 }
 
 // Uploads the file and returns its reference. The OneDrive name starts with
