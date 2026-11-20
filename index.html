@@ -206,6 +206,64 @@
     .summary-card .value { font-size: 1.4rem; font-weight: 700; color: var(--accent2); }
     .summary-card .sub   { font-size: 0.82rem; color: var(--muted); margin-top: 2px; }
 
+    /* ── Taxes tab ── */
+    /* Take-home headline + the key numbers beside it */
+    .tax-hero { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 14px; }
+    .tax-hero-main {
+      flex: 1 1 300px; border-radius: 12px; padding: 20px 22px;
+      background: linear-gradient(135deg, rgba(110,231,183,0.16), rgba(79,142,247,0.14));
+      border: 1px solid rgba(110,231,183,0.35);
+    }
+    .tax-hero-main.owe { background: linear-gradient(135deg, rgba(79,142,247,0.16), rgba(251,191,36,0.10)); border-color: rgba(79,142,247,0.4); }
+    .tax-hero-main .k { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; }
+    .tax-hero-main .v { font-size: 2.4rem; font-weight: 800; color: var(--accent2); margin: 6px 0; line-height: 1.1; font-variant-numeric: tabular-nums; }
+    .tax-hero-main .s { color: var(--text); opacity: 0.8; font-size: 0.85rem; line-height: 1.45; }
+    .tax-hero-stats { flex: 2 1 420px; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+    .tax-stat { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+    .tax-stat .k { color: var(--muted); font-size: 0.74rem; }
+    .tax-stat .v { font-size: 1.15rem; font-weight: 700; margin-top: 3px; font-variant-numeric: tabular-nums; }
+    .tax-stat .v.good { color: var(--accent2); }
+    .tax-stat .v.owe { color: #fbbf24; }
+    .tax-stat .v.small { font-size: 0.92rem; }
+    /* Household inputs */
+    .tax-inputs { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px 14px; }
+    .tax-inputs .group { grid-column: 1 / -1; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em;
+      color: var(--muted); border-bottom: 1px solid var(--border); padding-bottom: 5px; margin-top: 4px; }
+    /* space-between keeps the boxes lined up when a label wraps to two lines */
+    .tax-inputs label { display: flex; flex-direction: column; justify-content: space-between; gap: 5px; font-size: 0.78rem; color: var(--muted); }
+    .tax-inputs input, .tax-inputs select {
+      width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
+      color: var(--text); padding: 7px 9px; font-size: 0.9rem;
+    }
+    .tax-inputs input:focus, .tax-inputs select:focus { outline: none; border-color: var(--accent); }
+    /* The worked-out panels */
+    .tax-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+    .tax-panel { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+    .tax-panel h3 { display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+      font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent); margin-bottom: 6px; }
+    .tax-panel h3 span { font-size: 0.7rem; font-weight: 500; color: var(--muted); text-transform: none; letter-spacing: 0; }
+    .tax-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+      padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.88rem; }
+    .tax-row .lbl { min-width: 0; }
+    .tax-row .note { display: block; color: var(--muted); font-size: 0.74rem; margin-top: 1px; }
+    .tax-row .amt { white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .tax-row .amt.minus { color: #94a3b8; }
+    .tax-row.sub { border-top: 1px solid var(--border); }
+    .tax-row.total { border-bottom: none; border-top: 2px solid var(--border); margin-top: 2px; padding-top: 9px; font-weight: 700; }
+    .tax-row.total .amt { color: var(--accent2); }
+    /* Bottom line: each tax, the credits, and the result */
+    .tax-bottom { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 10px; margin-top: 14px; }
+    .tax-bottom > div { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px;
+      padding: 10px 14px; display: flex; flex-direction: column; gap: 3px; }
+    .tax-bottom span { color: var(--muted); font-size: 0.74rem; }
+    .tax-bottom b { font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+    .tax-bottom .final { border-color: rgba(110,231,183,0.5); }
+    .tax-bottom .final b { color: var(--accent2); }
+    .tax-bottom .final.owe { border-color: rgba(251,191,36,0.5); }
+    .tax-bottom .final.owe b { color: #fbbf24; }
+    .tax-foot { color: var(--muted); font-size: 0.78rem; margin-top: 14px; line-height: 1.55; }
+    @media (max-width: 600px) { .tax-hero-main .v { font-size: 2rem; } }
+
     .empty { color: var(--muted); text-align: center; padding: 24px; font-size: 0.9rem; }
 
     .export-row { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
@@ -477,6 +535,7 @@
     <button class="view-tab" id="tabExpenses" onclick="switchView('expenses')">Expenses</button>
     <button class="view-tab" id="tabInvoiceHistory" onclick="switchView('invoiceHistory')">Invoice History</button>
     <button class="view-tab" id="tabAccounting" onclick="switchView('accounting')">Accounting</button>
+    <button class="view-tab" id="tabTaxes" onclick="switchView('taxes')">Taxes</button>
   </div>
 
   <!-- Team View (manager account only) — visible on either tab, since it
@@ -875,48 +934,10 @@
     </div>
   </div>
 
-  <!-- 3. AGI -->
+  <!-- 3. Net profit: deposits less expenses (taxes are on the Taxes tab) -->
   <div class="card">
-    <h2>3 &middot; Adjusted Gross Income</h2>
-    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
-      <label style="display:flex;flex-direction:column;gap:4px;font-size:0.8rem;color:var(--muted)">W-2 wages this year (yours and your spouse's) &mdash; optional
-        <input type="number" id="acctWages" min="0" step="0.01" placeholder="0.00" onchange="saveAccountingYearInputs()" style="width:200px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px" />
-      </label>
-      <label style="display:flex;flex-direction:column;gap:4px;font-size:0.8rem;color:var(--muted)">Other income (interest, dividends&hellip;) &mdash; optional
-        <input type="number" id="acctOtherIncome" min="0" step="0.01" placeholder="0.00" onchange="saveAccountingYearInputs()" style="width:200px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px" />
-      </label>
-      <label style="display:flex;flex-direction:column;gap:4px;font-size:0.8rem;color:var(--muted)">Other adjustments (SEP-IRA, SE health insurance&hellip;) &mdash; optional
-        <input type="number" id="acctOtherAdjustments" min="0" step="0.01" placeholder="0.00" onchange="saveAccountingYearInputs()" style="width:200px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px" />
-      </label>
-    </div>
-    <div id="acctAgi"></div>
-  </div>
-
-  <!-- 4. Estimated taxes: SE tax + federal and South Carolina income tax -->
-  <div class="card">
-    <h2>4 &middot; Estimated Taxes</h2>
-    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
-      <label style="display:flex;flex-direction:column;gap:4px;font-size:0.8rem;color:var(--muted)">Filing status
-        <select id="acctFilingStatus" onchange="saveAccountingYearInputs()" style="width:220px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px">
-          <option value="single">Single</option>
-          <option value="mfj">Married filing jointly</option>
-          <option value="hoh">Head of household</option>
-        </select>
-      </label>
-      <!-- Children: all count for the Earned Income Credit and the SC
-           dependent exemption; under 17 for the Child Tax Credit; under 6
-           for SC's extra young-child deduction -->
-      <label style="display:flex;flex-direction:column;gap:4px;font-size:0.8rem;color:var(--muted)">Children you claim
-        <input type="number" id="acctKids" min="0" step="1" placeholder="0" onchange="saveAccountingYearInputs()" style="width:90px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px" />
-      </label>
-      <label style="display:flex;flex-direction:column;gap:4px;font-size:0.8rem;color:var(--muted)">&hellip;of them under 17
-        <input type="number" id="acctKidsUnder17" min="0" step="1" placeholder="0" onchange="saveAccountingYearInputs()" style="width:90px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px" />
-      </label>
-      <label style="display:flex;flex-direction:column;gap:4px;font-size:0.8rem;color:var(--muted)">&hellip;of them under 6
-        <input type="number" id="acctKidsUnder6" min="0" step="1" placeholder="0" onchange="saveAccountingYearInputs()" style="width:90px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px" />
-      </label>
-    </div>
-    <div id="acctTaxes"></div>
+    <h2>3 &middot; Net Profit</h2>
+    <div id="acctProfit"></div>
   </div>
 
   <!-- Business Info: the address/phone printed in every invoice header.
@@ -939,6 +960,70 @@
   </div>
 
   </div> <!-- /viewAccounting -->
+
+  <!-- ══ TAXES VIEW ══ Everything tax: household details, AGI, estimated
+       self-employment / federal / South Carolina tax, credits and what's
+       left to take home - worked out from the Accounting tab's net profit
+       for the same year. -->
+  <div id="viewTaxes" style="display:none">
+
+  <div class="card">
+    <div class="log-header">
+      <h2 style="margin-bottom:0">Cirrobound Solutions &mdash; Taxes</h2>
+      <div class="filter-row">
+        <!-- Same year as the Accounting tab: changing one changes both -->
+        <select id="taxYear" onchange="document.getElementById('acctYear').value = this.value; renderAccounting()"></select>
+        <button class="btn btn-ghost btn-sm" onclick="exportAccountingCSV()">Export CSV</button>
+      </div>
+    </div>
+    <div id="taxHero"></div>
+  </div>
+
+  <!-- Household details for the year (saved per year) -->
+  <div class="card">
+    <h2>Your Household</h2>
+    <p style="color:var(--muted);font-size:0.82rem;margin:-6px 0 14px">Saved for the selected year. Business income comes from the Accounting tab.</p>
+    <div class="tax-inputs">
+      <div class="group">Filing</div>
+      <label>Filing status
+        <select id="acctFilingStatus" onchange="saveAccountingYearInputs()">
+          <option value="single">Single</option>
+          <option value="mfj">Married filing jointly</option>
+          <option value="hoh">Head of household</option>
+        </select>
+      </label>
+      <!-- Children: all count for the Earned Income Credit and the SC
+           dependent exemption; under 17 for the Child Tax Credit; under 6
+           for SC's extra young-child deduction -->
+      <label>Children you claim
+        <input type="number" id="acctKids" min="0" step="1" placeholder="0" onchange="saveAccountingYearInputs()" />
+      </label>
+      <label>&hellip;of them under 17
+        <input type="number" id="acctKidsUnder17" min="0" step="1" placeholder="0" onchange="saveAccountingYearInputs()" />
+      </label>
+      <label>&hellip;of them under 6
+        <input type="number" id="acctKidsUnder6" min="0" step="1" placeholder="0" onchange="saveAccountingYearInputs()" />
+      </label>
+      <div class="group">Other income &amp; adjustments</div>
+      <label>W-2 wages (yours and your spouse's)
+        <input type="number" id="acctWages" min="0" step="0.01" placeholder="0.00" onchange="saveAccountingYearInputs()" />
+      </label>
+      <label>Other income (interest, dividends&hellip;)
+        <input type="number" id="acctOtherIncome" min="0" step="0.01" placeholder="0.00" onchange="saveAccountingYearInputs()" />
+      </label>
+      <label>Other adjustments (SEP-IRA, SE health insurance&hellip;)
+        <input type="number" id="acctOtherAdjustments" min="0" step="0.01" placeholder="0.00" onchange="saveAccountingYearInputs()" />
+      </label>
+    </div>
+  </div>
+
+  <!-- The worked-out estimate, panel by panel -->
+  <div class="card">
+    <h2>How It's Worked Out</h2>
+    <div id="acctTaxes"></div>
+  </div>
+
+  </div> <!-- /viewTaxes -->
 
 </div>
 
@@ -980,7 +1065,7 @@ let currentView = 'timeTracking';
 // gate during that window anyway, so there's nothing to protect yet;
 // updateSyncUI() re-checks and redirects non-managers once odAccount
 // is actually known.
-const MANAGER_ONLY_VIEWS = ['customers', 'retainers', 'projects', 'expenses', 'invoiceHistory', 'accounting'];
+const MANAGER_ONLY_VIEWS = ['customers', 'retainers', 'projects', 'expenses', 'invoiceHistory', 'accounting', 'taxes'];
 function switchView(view) {
   if (odAccount && MANAGER_ONLY_VIEWS.includes(view) && !isManager()) view = 'timeTracking';
   currentView = view;
@@ -992,6 +1077,7 @@ function switchView(view) {
   document.getElementById('viewProjects').style.display = view === 'projects' ? '' : 'none';
   document.getElementById('viewInvoiceHistory').style.display = view === 'invoiceHistory' ? '' : 'none';
   document.getElementById('viewAccounting').style.display = view === 'accounting' ? '' : 'none';
+  document.getElementById('viewTaxes').style.display = view === 'taxes' ? '' : 'none';
   document.getElementById('tabTimeTracking').classList.toggle('active', view === 'timeTracking');
   document.getElementById('tabCustomers').classList.toggle('active', view === 'customers');
   document.getElementById('tabExpenses').classList.toggle('active', view === 'expenses');
@@ -999,6 +1085,7 @@ function switchView(view) {
   document.getElementById('tabProjects').classList.toggle('active', view === 'projects');
   document.getElementById('tabInvoiceHistory').classList.toggle('active', view === 'invoiceHistory');
   document.getElementById('tabAccounting').classList.toggle('active', view === 'accounting');
+  document.getElementById('tabTaxes').classList.toggle('active', view === 'taxes');
   // The general Print Invoice button predates the retainer Statement flow
   // and doesn't know about retainer fees/overage — only meaningful on Time
   // Tracking (its original home), so it's hidden everywhere else to avoid
@@ -1011,7 +1098,7 @@ function switchView(view) {
   else if (view === 'expenses') renderExpenseCharts();
   else if (view === 'retainers') renderRetainersList();
   else if (view === 'projects') renderProjects();
-  else if (view === 'accounting') renderAccounting();
+  else if (view === 'accounting' || view === 'taxes') renderAccounting();   // draws both
   else renderInvoiceHistory();
 }
 
@@ -1246,7 +1333,7 @@ function init() {
   // Land back on whichever tab was open before the last refresh, rather
   // than always defaulting to Time Tracking.
   const savedView = localStorage.getItem('ct_lastView');
-  if (['timeTracking', 'customers', 'expenses', 'retainers', 'projects', 'invoiceHistory', 'accounting'].includes(savedView) && savedView !== currentView) {
+  if (['timeTracking', 'customers', 'expenses', 'retainers', 'projects', 'invoiceHistory', 'accounting', 'taxes'].includes(savedView) && savedView !== currentView) {
     switchView(savedView);
   }
 
@@ -2348,6 +2435,10 @@ function renderAccountingYearOptions() {
   const sorted = [...years].sort((a, b) => b.localeCompare(a));
   el.innerHTML = sorted.map(y => `<option value="${y}">${y} tax year</option>`).join('');
   el.value = prev && sorted.includes(prev) ? prev : String(new Date().getFullYear());
+  // The Taxes tab shows the same year
+  const taxYear = document.getElementById('taxYear');
+  taxYear.innerHTML = el.innerHTML;
+  taxYear.value = el.value;
 }
 
 function renderAccounting() {
@@ -2367,13 +2458,7 @@ function renderAccounting() {
   document.getElementById('acctSummary').innerHTML = `
     <div class="summary-card"><div class="label">Deposits</div><div class="value">${fmtMoney(a.revenue)}</div></div>
     <div class="summary-card"><div class="label">Total Deductible Expenses</div><div class="value">${fmtMoney(a.deductible)}</div></div>
-    <div class="summary-card"><div class="label">Net Profit (Business Income)</div><div class="value">${fmtMoney(a.netProfit)}</div></div>
-    <div class="summary-card"><div class="label">Est. AGI</div><div class="value">${fmtMoney(a.agi)}</div></div>
-    <div class="summary-card"><div class="label">Est. Self-Employment Tax</div><div class="value">${fmtMoney(a.seTax)}</div></div>
-    ${a.taxes ? (a.taxes.total >= 0
-      ? `<div class="summary-card"><div class="label">Est. Total Tax</div><div class="value">${fmtMoney(a.taxes.total)}</div></div>`
-      : `<div class="summary-card"><div class="label">Est. Refund</div><div class="value">${fmtMoney(-a.taxes.total)}</div></div>`) : ''}
-    ${a.taxes ? `<div class="summary-card"><div class="label">Est. Take-Home After Taxes</div><div class="value">${fmtMoney(a.taxes.takeHome)}</div></div>` : ''}`;
+    <div class="summary-card"><div class="label">Net Profit (Business Income)</div><div class="value">${fmtMoney(a.netProfit)}</div></div>`;
 
   // 1. Deposits
   document.getElementById('acctDeposits').innerHTML = (a.deposits.length ? `
@@ -2416,11 +2501,7 @@ function renderAccounting() {
       </tbody>
     </table>` : '<p class="empty">No business expenses for this year yet.</p>';
 
-  // 3. AGI
-  const inputs = (state.accountingYears || {})[a.year] || {};
-  document.getElementById('acctWages').value = inputs.wages || '';
-  document.getElementById('acctOtherIncome').value = inputs.otherIncome || '';
-  document.getElementById('acctOtherAdjustments').value = inputs.otherAdjustments || '';
+  // 3. Net profit: deposits less each expense category
   const expenseLines = a.categories.length
     ? a.categories.map(c => line(escHtml(c.category) +
         (c.miles ? ' ' + muted(`(${fmtMiles(c.miles)})`) : '') +
@@ -2430,93 +2511,155 @@ function renderAccounting() {
   renderBusinessInfo();
   renderInternetRule(a);
   renderMileageRateWarning(a);
-  document.getElementById('acctAgi').innerHTML = `
+  document.getElementById('acctProfit').innerHTML = `
     <table>
       <tbody>
         ${line('Deposits (revenue)', fmtMoney(a.revenue))}
         ${expenseLines}
         ${line('Total deductible expenses', '&minus;' + fmtMoney(a.deductible), { subtotal: true })}
         ${line('Net profit ' + muted('&mdash; your business income (Schedule C, line 31)'), fmtMoney(a.netProfit), { total: true })}
-        ${a.wages ? line('W-2 wages', '+' + fmtMoney(a.wages), { indent: true }) : ''}
-        ${a.otherIncome ? line('Other income', '+' + fmtMoney(a.otherIncome), { indent: true }) : ''}
-        ${line('Adjustments to income', '', { heading: true })}
-        ${line('Deductible half of self-employment tax', '&minus;' + fmtMoney(a.seTaxHalf), { indent: true })}
-        ${a.otherAdjustments ? line('Other adjustments', '&minus;' + fmtMoney(a.otherAdjustments), { indent: true }) : ''}
-        ${line('Adjusted Gross Income (est.)', fmtMoney(a.agi), { total: true })}
       </tbody>
     </table>
-    <p style="color:var(--muted);font-size:0.8rem;margin:12px 0 0">
-      Assumes Cirrobound files on Schedule C (single-member LLC or sole proprietor); if it's taxed as an S-corp the SE-tax lines don't apply.
-      These are estimates &mdash; confirm with your accountant.
+    <p style="color:var(--muted);font-size:0.85rem;margin:12px 0 0">
+      AGI, estimated taxes and what you take home are on the
+      <a href="#" onclick="switchView('taxes'); return false;" style="color:var(--accent2)">Taxes tab</a>.
     </p>`;
-  renderTaxes(a, line, muted);
+  renderTaxes(a);
 }
 
-// 4. Estimated taxes: SE tax, federal income tax, SC income tax, total
-function renderTaxes(a, line, muted) {
-  const status = document.getElementById('acctFilingStatus');
-  if (document.activeElement !== status) status.value = a.filingStatus;
-  [['acctKids', a.kids], ['acctKidsUnder17', a.kidsUnder17], ['acctKidsUnder6', a.kidsUnder6]].forEach(([id, n]) => {
-    const el = document.getElementById(id);
-    if (document.activeElement !== el) el.value = n || '';
-  });
-  const box = document.getElementById('acctTaxes');
+// -- Taxes tab -------------------------------------------------------------
+// One line of a tax panel: label with an optional small note under it, and
+// the amount (minus: shown as a deduction; plus: shown as an addition;
+// sub: rule above; total: bold result).
+function taxRow(label, amount, opts = {}) {
+  const sign = opts.minus ? '&minus;' : opts.plus ? '+' : '';
+  return `<div class="tax-row${opts.sub ? ' sub' : ''}${opts.total ? ' total' : ''}">
+      <span class="lbl">${label}${opts.note ? `<span class="note">${opts.note}</span>` : ''}</span>
+      <span class="amt${opts.minus ? ' minus' : ''}">${sign}${fmtMoney(amount)}</span>
+    </div>`;
+}
+// A titled panel of rows; `form` is the tax form it matches, shown small
+function taxPanel(title, form, rows) {
+  return `<section class="tax-panel"><h3>${title}${form ? `<span>${form}</span>` : ''}</h3>${rows}</section>`;
+}
+function taxStat(label, value, cls) {
+  return `<div class="tax-stat"><div class="k">${label}</div><div class="v${cls ? ' ' + cls : ''}">${value}</div></div>`;
+}
+
+// Draws the Taxes tab: household inputs, the take-home headline and the
+// panels showing how each tax and credit is worked out.
+function renderTaxes(a) {
+  // Household inputs for the year (skipping a box you're typing in)
+  const inputs = (state.accountingYears || {})[a.year] || {};
+  const fill = (id, v) => { const el = document.getElementById(id); if (document.activeElement !== el) el.value = v; };
+  fill('acctFilingStatus', a.filingStatus);
+  fill('acctKids', a.kids || '');
+  fill('acctKidsUnder17', a.kidsUnder17 || '');
+  fill('acctKidsUnder6', a.kidsUnder6 || '');
+  fill('acctWages', inputs.wages || '');
+  fill('acctOtherIncome', inputs.otherIncome || '');
+  fill('acctOtherAdjustments', inputs.otherAdjustments || '');
+
   const t = a.taxes;
-  const seLine = line('Self-employment tax ' + muted(`12.4% Social Security (up to the wage base) + 2.9% Medicare, on 92.35% of net profit &mdash; Schedule SE`), fmtMoney(a.seTax));
+  const rules = TAX_RULES[a.year];
+  // Self-employment tax in its two parts (see selfEmploymentTax)
+  const earnings = a.netProfit * 0.9235;
+  const seApplies = earnings >= 400;
+  const ssPart = seApplies ? Math.min(earnings, rules ? rules.ssWageBase : Infinity) * 0.124 : 0;
+  const medPart = seApplies ? earnings * 0.029 : 0;
+
+  const agiPanel = taxPanel('Adjusted gross income', 'Schedule 1',
+    taxRow('Net profit', a.netProfit, { note: 'Business income &mdash; Schedule C, line 31' }) +
+    (a.wages ? taxRow('W-2 wages', a.wages, { plus: true }) : '') +
+    (a.otherIncome ? taxRow('Other income', a.otherIncome, { plus: true }) : '') +
+    taxRow('Half of self-employment tax', a.seTaxHalf, { minus: true, note: 'Adjustment to income' }) +
+    (a.otherAdjustments ? taxRow('Other adjustments', a.otherAdjustments, { minus: true }) : '') +
+    taxRow('Adjusted gross income', a.agi, { total: true }));
+  const sePanel = taxPanel('Self-employment tax', 'Schedule SE',
+    taxRow('Net earnings', earnings, { note: seApplies ? '92.35% of net profit' : '92.35% of net profit &mdash; under $400, so no SE tax' }) +
+    taxRow('Social Security', ssPart, { note: `12.4%${rules ? ` on up to ${fmtMoney(rules.ssWageBase)}` : ''}` }) +
+    taxRow('Medicare', medPart, { note: '2.9%' }) +
+    taxRow('Self-employment tax', a.seTax, { total: true }));
+
+  const hero = document.getElementById('taxHero');
+  const box = document.getElementById('acctTaxes');
   if (!t) {
-    box.innerHTML = `<table><tbody>${seLine}</tbody></table>
-      <p style="color:var(--muted);font-size:0.85rem;margin:10px 0 0">Federal and South Carolina income tax rules for ${a.year} aren't in the app yet (it has ${Object.keys(TAX_RULES).join(', ')}).</p>`;
+    // No income-tax rules for this year: only the SE tax can be shown
+    hero.innerHTML = `
+      <div class="tax-hero">
+        <div class="tax-hero-main owe">
+          <div class="k">Take-home after self-employment tax &middot; ${a.year}</div>
+          <div class="v">${fmtMoney(a.netProfit + a.wages + a.otherIncome - a.seTax)}</div>
+          <div class="s">Federal and South Carolina income tax rules for ${a.year} aren't in the app yet (it has ${Object.keys(TAX_RULES).join(', ')}), so income tax isn't included.</div>
+        </div>
+      </div>`;
+    box.innerHTML = `<div class="tax-grid">${agiPanel}${sePanel}</div>`;
     return;
   }
-  const pct = a.netProfit > 0 ? ` &mdash; about ${fmtPct(t.total / a.netProfit)} of net profit` : '';
+
+  const refund = t.total < 0;
+  const credits = t.ctcUsed + t.actc + t.eitc + t.scEitc;
+  hero.innerHTML = `
+    <div class="tax-hero">
+      <div class="tax-hero-main${refund ? '' : ' owe'}">
+        <div class="k">Take-home after taxes &middot; ${a.year}</div>
+        <div class="v">${fmtMoney(t.takeHome)}</div>
+        <div class="s">${a.wages || a.otherIncome ? 'Net profit, wages and other income' : 'Net profit'} ${fmtMoney(t.income)}
+          ${refund ? `+ estimated refund ${fmtMoney(-t.total)}.<br>The refund comes after you file.` : `&minus; estimated tax ${fmtMoney(t.total)}.`}</div>
+      </div>
+      <div class="tax-hero-stats">
+        ${taxStat('Net profit', fmtMoney(a.netProfit))}
+        ${taxStat('Adjusted gross income', fmtMoney(a.agi))}
+        ${taxStat('Taxes before credits', fmtMoney(t.beforeCredits))}
+        ${taxStat('Credits', fmtMoney(credits))}
+        ${taxStat(refund ? 'Estimated refund' : 'Total estimated tax', fmtMoney(Math.abs(t.total)), refund ? 'good' : 'owe')}
+        ${taxStat('Effective tax rate', refund ? 'None &mdash; credits exceed taxes' : fmtPct(t.total / t.income), refund ? 'good small' : '')}
+      </div>
+    </div>`;
+
+  const status = FILING_STATUS_NAMES[t.status];
+  const fedPanel = taxPanel('Federal income tax', 'Form 1040',
+    taxRow('Adjusted gross income', a.agi) +
+    taxRow('Standard deduction', t.std, { minus: true, note: status }) +
+    taxRow('Qualified business income deduction', t.qbiDeduction, { minus: true, note: t.overQbiThreshold
+      ? 'Not estimated above the threshold for a consulting business'
+      : '20% of business income after half the SE tax' }) +
+    taxRow('Taxable income', t.fedTaxable, { sub: true }) +
+    taxRow('Income tax', t.fedIncomeTax, { note: `${a.year} brackets, ${status.toLowerCase()}` }) +
+    (t.ctcFull ? taxRow('Child tax credit', t.ctcUsed, { minus: true, note: `${a.kidsUnder17} &times; $2,200 &mdash; used up to the tax` }) : '') +
+    (t.addlMedicare ? taxRow('Additional Medicare tax', t.addlMedicare, { plus: true, note: '0.9% above the threshold (Form 8959)' }) : '') +
+    taxRow('Federal income tax', t.fedAfterCtc + t.addlMedicare, { total: true }));
+  const scRules = rules.sc;
+  const scPanel = taxPanel('South Carolina income tax', 'SC1040',
+    taxRow('Federal AGI', a.agi, { note: 'South Carolina starts here' }) +
+    taxRow('SC income adjusted deduction', t.sciad, { minus: true, note: status + (t.sciad === 0 ? ', fully phased out' : '') }) +
+    (t.scDependents ? taxRow('Dependent exemptions', t.scDependents, { minus: true,
+      note: `${a.kids} &times; $${scRules.dependentExemption.toLocaleString()}${a.kidsUnder6 ? ` + ${a.kidsUnder6} under 6` : ''} &mdash; ${scRules.dependentExemptionNote}` }) : '') +
+    taxRow('SC taxable income', t.scTaxable, { sub: true }) +
+    taxRow('SC income tax', t.scIncomeTax, { note: t.scTaxable < 30000 ? '1.99%' : '5.21% minus $966' }) +
+    (t.scEitc ? taxRow('SC earned income credit', t.scEitc, { minus: true, note: '125% of the federal one, at most $200' }) : '') +
+    taxRow('South Carolina tax', t.scAfterCredits, { total: true }));
+  const creditPanel = t.actc || t.eitc ? taxPanel('Refundable credits', 'paid to you',
+    (t.actc ? taxRow('Additional child tax credit', t.actc, { note: 'Rest of the child credit, up to $1,700 a child' }) : '') +
+    (t.eitc ? taxRow('Earned income credit', t.eitc, { note: `${Math.min(a.kids, 3)}${a.kids >= 3 ? '+' : ''} children &middot; earned income ${fmtMoney(t.earned)}` }) : '') +
+    taxRow('Refundable credits', t.actc + t.eitc, { total: true })) : '';
+
   box.innerHTML = `
-    <table>
-      <tbody>
-        ${line('Self-employment tax', '', { heading: true })}
-        ${line('Self-employment tax ' + muted('12.4% Social Security + 2.9% Medicare on 92.35% of net profit (Schedule SE)'), fmtMoney(a.seTax), { indent: true })}
-
-        ${line('Federal income tax', '', { heading: true })}
-        ${line('Adjusted Gross Income', fmtMoney(a.agi), { indent: true })}
-        ${line('Standard deduction ' + muted(`(${FILING_STATUS_NAMES[t.status]})`), '&minus;' + fmtMoney(t.std), { indent: true })}
-        ${line('Qualified business income deduction ' + muted(t.overQbiThreshold
-            ? '&mdash; not estimated: income is above the threshold where it shrinks for a consulting business'
-            : `20% of ${fmtMoney(t.qbi)} business income after half the SE tax`), '&minus;' + fmtMoney(t.qbiDeduction), { indent: true })}
-        ${line('Federal taxable income', fmtMoney(t.fedTaxable), { indent: true, subtotal: true })}
-        ${line('Federal income tax ' + muted(`${a.year} brackets`), fmtMoney(t.fedIncomeTax), { indent: true })}
-        ${t.ctcFull ? line('Child tax credit ' + muted(`${a.kidsUnder17} &times; $2,200, used against the income tax`), '&minus;' + fmtMoney(t.ctcUsed), { indent: true }) : ''}
-        ${t.ctcFull ? line('Federal income tax after the credit', fmtMoney(t.fedAfterCtc), { indent: true, subtotal: true }) : ''}
-        ${t.addlMedicare ? line('Additional Medicare tax ' + muted('0.9% above the threshold (Form 8959)'), fmtMoney(t.addlMedicare), { indent: true }) : ''}
-
-        ${t.actc || t.eitc ? line('Refundable federal credits ' + muted('(paid to you even beyond the tax you owe)'), '', { heading: true }) : ''}
-        ${t.actc ? line('Additional child tax credit ' + muted(`rest of the child credit, up to $1,700 a child`), '&minus;' + fmtMoney(t.actc), { indent: true }) : ''}
-        ${t.eitc ? line('Earned income credit ' + muted(`${Math.min(a.kids, 3)}${a.kids >= 3 ? '+' : ''} children, earned income ${fmtMoney(t.earned)}`), '&minus;' + fmtMoney(t.eitc), { indent: true }) : ''}
-
-        ${line('South Carolina income tax', '', { heading: true })}
-        ${line('Federal AGI ' + muted('(South Carolina starts here)'), fmtMoney(a.agi), { indent: true })}
-        ${line('SC Income Adjusted Deduction (SCIAD) ' + muted(`(${FILING_STATUS_NAMES[t.status]}${t.sciad === 0 ? ', fully phased out' : ''})`), '&minus;' + fmtMoney(t.sciad), { indent: true })}
-        ${t.scDependents ? line('SC dependent exemptions ' + muted(`${a.kids} &times; $${(TAX_RULES[a.year].sc.dependentExemption).toLocaleString()}${a.kidsUnder6 ? ` + ${a.kidsUnder6} under 6` : ''} (${TAX_RULES[a.year].sc.dependentExemptionNote})`), '&minus;' + fmtMoney(t.scDependents), { indent: true }) : ''}
-        ${line('SC taxable income', fmtMoney(t.scTaxable), { indent: true, subtotal: true })}
-        ${line('SC income tax ' + muted(t.scTaxable < 30000 ? '1.99%' : '5.21% minus $966'), fmtMoney(t.scIncomeTax), { indent: true })}
-        ${t.scEitc ? line('SC earned income credit ' + muted('125% of the federal one, at most $200'), '&minus;' + fmtMoney(t.scEitc), { indent: true }) : ''}
-
-        ${line('Taxes before credits', fmtMoney(t.beforeCredits), { subtotal: true })}
-        ${t.total >= 0
-          ? line('Total estimated tax' + muted(pct), fmtMoney(t.total), { total: true })
-          : line('Estimated refund ' + muted('&mdash; your credits are more than your taxes'), fmtMoney(-t.total), { total: true })}
-
-        ${line('Take-home after taxes ' + muted((a.wages || a.otherIncome
-            ? `net profit ${fmtMoney(a.netProfit)} + wages and other income ${fmtMoney(a.wages + a.otherIncome)}`
-            : `net profit ${fmtMoney(a.netProfit)}`)
-            + (t.total >= 0 ? ` &minus; ${fmtMoney(t.total)} tax` : ` + ${fmtMoney(-t.total)} refund`)
-            + (t.total < 0 ? ' (the refund comes after you file)' : '')), fmtMoney(t.takeHome), { total: true })}
-      </tbody>
-    </table>
-    <p style="color:var(--muted);font-size:0.8rem;margin:12px 0 0">
-      Uses the standard deduction (no itemizing). Credits included: child tax credit, earned income credit and SC's earned income credit;
-      others (e.g. child care, education) and other deductions (senior, tips, overtime) aren't, nor anything already paid or withheld.
-      With "Married filing jointly", include your spouse's wages above. Children are assumed to qualify (your dependents with Social Security
-      numbers; for the earned income credit, under 19 or a full-time student under 24, and investment income under $12,200).
-      Estimates only &mdash; confirm with your accountant.
+    <div class="tax-grid">${agiPanel}${sePanel}${fedPanel}${scPanel}${creditPanel}</div>
+    <div class="tax-bottom">
+      <div><span>Self-employment tax</span><b>${fmtMoney(a.seTax)}</b></div>
+      <div><span>Federal income tax</span><b>${fmtMoney(t.fedAfterCtc + t.addlMedicare)}</b></div>
+      <div><span>South Carolina tax</span><b>${fmtMoney(t.scAfterCredits)}</b></div>
+      ${t.actc || t.eitc ? `<div><span>Refundable credits</span><b>&minus;${fmtMoney(t.actc + t.eitc)}</b></div>` : ''}
+      <div class="final${refund ? '' : ' owe'}"><span>${refund ? 'Estimated refund' : 'Total estimated tax'}</span><b>${fmtMoney(Math.abs(t.total))}</b></div>
+      <div class="final"><span>Take-home after taxes</span><b>${fmtMoney(t.takeHome)}</b></div>
+    </div>
+    <p class="tax-foot">
+      Assumes Cirrobound files on Schedule C (single-member LLC). Uses the standard deduction (no itemizing).
+      Credits included: child tax credit, earned income credit and SC's earned income credit &mdash; not others (child care,
+      education) or other deductions (senior, tips, overtime), and nothing already paid or withheld. Children are assumed to
+      qualify (dependents with Social Security numbers; for the earned income credit, under 19 or a full-time student under 24,
+      and investment income under $12,200). Estimates only &mdash; confirm with your accountant.
     </p>`;
 }
 
@@ -5873,7 +6016,7 @@ function updateSyncUI() {
     // Customers/Retainers/Projects/Expenses/Invoice History are Taylor's
     // business-management views (billing, invoicing, client records) —
     // teammates only ever need Time Tracking to log their own hours.
-    ['tabCustomers', 'tabRetainers', 'tabProjects', 'tabExpenses', 'tabInvoiceHistory', 'tabAccounting'].forEach(id => {
+    ['tabCustomers', 'tabRetainers', 'tabProjects', 'tabExpenses', 'tabInvoiceHistory', 'tabAccounting', 'tabTaxes'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.style.display = isManager() ? '' : 'none';
     });
