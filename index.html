@@ -109,6 +109,16 @@
     /* Wide tables scroll inside their card rather than pushing the row's
        buttons off the edge of the page. */
     .table-scroll { overflow-x: auto; }
+    /* Address suggestions under a trip's From / To box. Fixed to the page so
+       a scrolling table can't clip it. */
+    #addrSuggest { position: fixed; z-index: 2000; display: none; max-height: 280px; overflow-y: auto;
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.45); font-size: 0.85rem; }
+    #addrSuggest .addr-item { display: block; width: 100%; text-align: left; background: none; border: 0;
+      color: var(--text); padding: 7px 10px; cursor: pointer; font: inherit; }
+    #addrSuggest .addr-item.active, #addrSuggest .addr-item:hover { background: rgba(255,255,255,0.08); }
+    #addrSuggest .addr-head { padding: 6px 10px 2px; font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+    #addrSuggest .addr-note { padding: 6px 10px; color: var(--muted); }
     .manual-row label { display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; color: var(--muted); }
     .manual-row input, .manual-row select, .manual-row textarea {
       background: var(--surface2);
@@ -833,10 +843,10 @@
            log), and business miles x the mileage rate is the expense, so
            Amount is hidden and worked out from these. -->
       <label id="bizExpFromField" style="display:none">From
-        <input id="bizExpFrom" placeholder="e.g. Home office" style="width:150px" />
+        <input id="bizExpFrom" placeholder="Start typing an address" autocomplete="off" style="width:190px" />
       </label>
       <label id="bizExpToField" style="display:none">To
-        <input id="bizExpTo" placeholder="e.g. Client A office &rarr; back" style="width:190px" />
+        <input id="bizExpTo" placeholder="Start typing an address" autocomplete="off" style="width:220px" />
       </label>
       <label id="bizExpMilesField" style="display:none">Miles
         <input type="number" id="bizExpMiles" placeholder="0" min="0" step="0.1" style="width:80px" oninput="updateBizExpFields()" />
@@ -860,7 +870,7 @@
       <button class="btn btn-primary" onclick="addBusinessExpense()" style="align-self:flex-end">+ Add Expense</button>
     </div>
     <p style="margin:10px 0 0;font-size:0.8rem;color:var(--muted)">Internet: enter the full bill as the amount and that month's business-use %; only that share counts as an expense.</p>
-    <p style="margin:4px 0 0;font-size:0.8rem;color:var(--muted)">Car &amp; Mileage: enter where you drove from and to, the total business miles, and the purpose; the miles count at the mileage rate. For several stops, list them in To (e.g. "Client A office &rarr; Client B office &rarr; back"). The rate covers gas and other running costs, so don't also enter gas for the same car. Parking and tolls can still go in on their own.</p>
+    <p style="margin:4px 0 0;font-size:0.8rem;color:var(--muted)">Car &amp; Mileage: enter where you drove from and to, the total business miles, and the purpose; the miles count at the mileage rate. For several stops, list them in To separated by &rarr; (e.g. "Client A office &rarr; Client B office &rarr; back"); type "-&gt;" and it becomes &rarr;. Addresses are suggested as you type: first places you've used before, then matches from OpenStreetMap (what you type is sent to photon.komoot.io to search). The rate covers gas and other running costs, so don't also enter gas for the same car. Parking and tolls can still go in on their own.</p>
     <div id="internetRuleWarning" style="display:none;background:#3a2e12;border:1px solid #b8860b;color:#fbbf24;border-radius:6px;padding:8px 12px;font-size:0.85rem;margin-top:8px"></div>
     <div id="acctExpenses" class="table-scroll" style="margin-top:14px"></div>
     <div class="export-row" style="margin-top:14px">
@@ -1197,6 +1207,9 @@ function init() {
   document.getElementById('expenseDate').value = localDateStr(now);
   document.getElementById('bizExpDate').value = localDateStr(now);
   document.getElementById('bizExpCategory').innerHTML = businessCategoryOptionsHtml();
+  // Trip From / To boxes suggest addresses as you type
+  attachAddressLookup(document.getElementById('bizExpFrom'));
+  attachAddressLookup(document.getElementById('bizExpTo'), { multiStop: true });
 
   // Month filter starts on All
   document.getElementById('filterMonth').value = '';
@@ -1894,6 +1907,157 @@ const isMileage = e => e.category === MILEAGE_CATEGORY && typeof e.miles === 'nu
 function mileageAmount(miles, rate) { return Math.round(miles * rate * 100) / 100; }
 // Reads a positive number box, or null
 function readPositive(el) { const n = parseFloat(el.value); return n > 0 ? n : null; }
+// -- Address lookup for a trip's From / To ------------------------------
+// As you type, a list drops down under the box: first places used on
+// earlier trips (instant, from this app's own data), then real addresses
+// from OpenStreetMap via the free Photon search service (no key needed).
+// Arrow keys + Enter or a click picks one; Esc closes the list. In To,
+// stops are separated by "->" / an arrow, and only the stop being typed is
+// looked up and replaced, so a multi-stop trip can be built stop by stop.
+const ADDR_SEARCH_URL = 'https://photon.komoot.io/api/';
+const ARROW = ' → ';
+let addrBox = null;          // the shared suggestion list (one on the page)
+let addrBias = null;         // [lon, lat] of the last address picked - nearby results first
+
+// Places from earlier trips: every From, and every stop in every To
+function usedTripPlaces() {
+  const seen = new Map();
+  (state.businessExpenses || []).filter(isMileage).forEach(e => {
+    [e.from, ...String(e.to || '').split(/\s*(?:→|->)\s*/)].forEach(p => {
+      const t = (p || '').trim();
+      if (t && t.toLowerCase() !== 'back' && !seen.has(t.toLowerCase())) seen.set(t.toLowerCase(), t);
+    });
+  });
+  return [...seen.values()];
+}
+
+// One OpenStreetMap result as a readable one-line address
+function formatPlace(props) {
+  const street = [props.housenumber, props.street].filter(Boolean).join(' ');
+  const region = [props.state, props.postcode].filter(Boolean).join(' ');
+  const parts = [];
+  // A named place (business, building) leads, unless the name is just the street
+  if (props.name && props.name !== street && props.name !== props.street) parts.push(props.name);
+  if (street) parts.push(street);
+  [props.city || props.town || props.district, region, props.countrycode && props.countrycode !== 'US' ? props.country : '']
+    .forEach(x => { if (x && !parts.includes(x)) parts.push(x); });
+  return parts.join(', ');
+}
+
+// Wires one text box up to the lookup (safe to call again on a new box)
+function attachAddressLookup(input, opts = {}) {
+  if (!input) return;
+  if (!addrBox) {
+    addrBox = document.createElement('div');
+    addrBox.id = 'addrSuggest';
+    // mousedown (not click) so the box doesn't lose focus and close first
+    addrBox.addEventListener('mousedown', ev => {
+      const item = ev.target.closest('.addr-item');
+      ev.preventDefault();
+      if (item && addrBox._pick) addrBox._pick(+item.dataset.i);
+    });
+    document.body.appendChild(addrBox);
+    // The list is placed on the page, so close it rather than leave it behind
+    window.addEventListener('scroll', () => hideAddrBox(), true);
+    window.addEventListener('resize', () => hideAddrBox());
+  }
+  let timer = null, controller = null, items = [], active = -1, query = '';
+
+  // The part of the box being looked up: in To, only the stop after the last arrow
+  const split = () => {
+    const v = input.value;
+    if (!opts.multiStop) return { prefix: '', part: v };
+    const m = v.match(/^(.*(?:→|->)\s*)([^→]*)$/s);
+    return m ? { prefix: m[1].replace(/\s*(?:→|->)\s*$/, ARROW), part: m[2] } : { prefix: '', part: v };
+  };
+
+  const show = (list, note) => {
+    items = list; active = -1;
+    if (!list.length && !note) { hideAddrBox(); return; }
+    const used = list.filter(x => x.used), found = list.filter(x => !x.used);
+    let html = '', i = 0;
+    const rows = arr => arr.map(x => `<button type="button" class="addr-item" data-i="${list.indexOf(x)}">${escHtml(x.text)}</button>`).join('');
+    if (used.length) html += `<div class="addr-head">Used before</div>${rows(used)}`;
+    if (found.length) html += `<div class="addr-head">Addresses</div>${rows(found)}`;
+    if (note) html += `<div class="addr-note">${escHtml(note)}</div>`;
+    addrBox.innerHTML = html;
+    const r = input.getBoundingClientRect();
+    addrBox.style.left = r.left + 'px';
+    addrBox.style.top = (r.bottom + 2) + 'px';
+    addrBox.style.width = Math.max(r.width, 320) + 'px';
+    addrBox.style.display = 'block';
+    addrBox._owner = input;
+    addrBox._pick = i2 => {
+      const { prefix } = split();
+      input.value = prefix + items[i2].text;
+      if (items[i2].coords) addrBias = items[i2].coords;
+      hideAddrBox();
+      input.focus();
+    };
+  };
+
+  const highlight = n => {
+    const els = addrBox.querySelectorAll('.addr-item');
+    if (!els.length) return;
+    active = (n + els.length) % els.length;
+    els.forEach(el => el.classList.toggle('active', +el.dataset.i === active));
+    const el = addrBox.querySelector(`.addr-item[data-i="${active}"]`);
+    if (el) el.scrollIntoView({ block: 'nearest' });
+  };
+
+  const search = async () => {
+    // Typing "->" turns into an arrow, so stops read cleanly
+    if (opts.multiStop && input.value.includes('->')) {
+      // Keep the cursor the same distance from the end (stops are typed at the end)
+      const fromEnd = input.value.length - input.selectionStart;
+      input.value = input.value.replace(/\s*->\s*/g, ARROW);
+      const pos = Math.max(0, input.value.length - fromEnd);
+      input.setSelectionRange(pos, pos);
+    }
+    const part = split().part.trim();
+    query = part;
+    if (part.length < 3) { hideAddrBox(); return; }
+    const lower = part.toLowerCase();
+    const used = usedTripPlaces().filter(t => t.toLowerCase().includes(lower)).slice(0, 4).map(text => ({ text, used: true }));
+    show(used, 'Searching addresses…');
+    if (controller) controller.abort();
+    controller = new AbortController();
+    try {
+      // Ask for extra, since non-US matches are dropped below
+      const params = new URLSearchParams({ q: part, limit: '20', lang: 'en' });
+      if (addrBias) { params.set('lon', addrBias[0]); params.set('lat', addrBias[1]); }
+      const res = await fetch(ADDR_SEARCH_URL + '?' + params, { signal: controller.signal });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      if (query !== part || document.activeElement !== input) return;   // typing moved on
+      const seen = new Set(used.map(x => x.text.toLowerCase()));
+      // US addresses only, unless nothing in the US matches
+      let features = data.features || [];
+      const us = features.filter(f => f.properties.countrycode === 'US');
+      if (us.length) features = us;
+      const found = features.slice(0, 7)
+        .map(f => ({ text: formatPlace(f.properties), coords: f.geometry && f.geometry.coordinates }))
+        .filter(x => x.text && !seen.has(x.text.toLowerCase()) && seen.add(x.text.toLowerCase()));
+      show([...used, ...found], found.length || used.length ? '' : 'No matching addresses — you can type it in yourself.');
+    } catch (err) {
+      if (err.name === 'AbortError') return;
+      if (query === part && document.activeElement === input)
+        show(used, 'Address search is unavailable right now — you can type it in yourself.');
+    }
+  };
+
+  input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(search, 300); });
+  input.addEventListener('keydown', ev => {
+    if (addrBox.style.display !== 'block' || addrBox._owner !== input) return;
+    if (ev.key === 'ArrowDown') { ev.preventDefault(); highlight(active + 1); }
+    else if (ev.key === 'ArrowUp') { ev.preventDefault(); highlight(active - 1); }
+    else if (ev.key === 'Enter' && active >= 0) { ev.preventDefault(); addrBox._pick(active); }
+    else if (ev.key === 'Escape') { hideAddrBox(); }
+  });
+  input.addEventListener('blur', () => setTimeout(() => { if (addrBox._owner === input) hideAddrBox(); }, 150));
+}
+function hideAddrBox() { if (addrBox) { addrBox.style.display = 'none'; addrBox._owner = null; } }
+
 // "Home office -> Client A office" for a trip, or '' if neither end is set
 function tripRoute(e) {
   return e.from || e.to ? `${e.from || '?'} \u2192 ${e.to || '?'}` : '';
@@ -2350,8 +2514,8 @@ function editBusinessExpense(id) {
         $<input type="number" id="bed-rate" value="${isMileage(e) ? e.mileRate : MILEAGE_RATE_DEFAULT}" min="0" step="0.005" title="Rate in dollars per mile" oninput="updateBedFields()" style="${st};width:65px;margin-top:4px">/mi
       </span></td>
     <td><span id="bed-route-wrap" style="display:${e.category === MILEAGE_CATEGORY ? 'block' : 'none'};margin-bottom:4px;white-space:nowrap">
-        <input type="text" id="bed-from" value="${escHtml(e.from || '')}" placeholder="From" title="Where the trip started" style="${st};width:110px"> &rarr;
-        <input type="text" id="bed-to" value="${escHtml(e.to || '')}" placeholder="To" title="Where you went" style="${st};width:130px">
+        <input type="text" id="bed-from" value="${escHtml(e.from || '')}" placeholder="From" title="Where the trip started" autocomplete="off" style="${st};width:150px"> &rarr;
+        <input type="text" id="bed-to" value="${escHtml(e.to || '')}" placeholder="To" title="Where you went" autocomplete="off" style="${st};width:170px">
       </span>
       <input type="text" id="bed-desc" value="${escHtml(e.description)}" placeholder="${e.category === MILEAGE_CATEGORY ? 'Business purpose' : ''}" style="${st};width:180px"></td>
     <td><input type="number" id="bed-amount" value="${e.amount}" min="0" step="0.01" style="${st};width:100px" ${e.category === MILEAGE_CATEGORY ? 'disabled title="Worked out from miles x rate"' : ''}></td>
@@ -2360,6 +2524,8 @@ function editBusinessExpense(id) {
       <button class="btn btn-primary btn-sm" onclick="saveBusinessExpense('${id}')">Save</button>
       <button class="btn btn-ghost btn-sm" onclick="renderAccounting()">Cancel</button>
     </td>`;
+  attachAddressLookup(document.getElementById('bed-from'));
+  attachAddressLookup(document.getElementById('bed-to'), { multiStop: true });
 }
 // Edit row: show the % box for Internet, Miles x Rate for Car & Mileage
 // (Amount then follows from them and can't be typed).
