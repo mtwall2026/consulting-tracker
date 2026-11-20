@@ -870,7 +870,7 @@
       <button class="btn btn-primary" onclick="addBusinessExpense()" style="align-self:flex-end">+ Add Expense</button>
     </div>
     <p style="margin:10px 0 0;font-size:0.8rem;color:var(--muted)">Internet: enter the full bill as the amount and that month's business-use %; only that share counts as an expense.</p>
-    <p style="margin:4px 0 0;font-size:0.8rem;color:var(--muted)">Car &amp; Mileage: enter where you drove from and to, the total business miles, and the purpose; the miles count at the mileage rate. For several stops, list them in To separated by &rarr; (e.g. "Client A office &rarr; Client B office &rarr; back"); type "-&gt;" and it becomes &rarr;. Addresses are suggested as you type: first places you've used before, then matches from OpenStreetMap (what you type is sent to photon.komoot.io to search). The rate covers gas and other running costs, so don't also enter gas for the same car. Parking and tolls can still go in on their own.</p>
+    <p style="margin:4px 0 0;font-size:0.8rem;color:var(--muted)">Car &amp; Mileage: enter where you drove from and to, the total business miles, and the purpose; the miles count at the mileage rate. For several stops, list them in To separated by &rarr; (e.g. "Client A office &rarr; Client B office &rarr; back"); type "-&gt;" and it becomes &rarr;. Addresses are suggested as you type: first places you've used before, then matches from Google if a Google Maps key is saved in Business Info, otherwise OpenStreetMap (what you type is sent to that service to search). The rate covers gas and other running costs, so don't also enter gas for the same car. Parking and tolls can still go in on their own.</p>
     <div id="internetRuleWarning" style="display:none;background:#3a2e12;border:1px solid #b8860b;color:#fbbf24;border-radius:6px;padding:8px 12px;font-size:0.85rem;margin-top:8px"></div>
     <div id="acctExpenses" class="table-scroll" style="margin-top:14px"></div>
     <div class="export-row" style="margin-top:14px">
@@ -909,6 +909,16 @@
         <input type="text" id="businessInfoPhone" placeholder="555-555-0100" style="width:160px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px" />
       </label>
       <button class="btn btn-primary" onclick="saveBusinessInfo()">Save</button>
+    </div>
+    <!-- Optional Google key: trip From / To boxes then use Google's address
+         search instead of OpenStreetMap. A browser key restricted to this
+         site; kept in your data (OneDrive), never in the app's code. -->
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-top:14px">
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:0.8rem;color:var(--muted)">Google Maps key <span style="font-size:0.75rem">(optional &mdash; Google address suggestions on trips)</span>
+        <input type="text" id="businessInfoGoogleKey" autocomplete="off" spellcheck="false" placeholder="AIza&hellip;" style="width:340px;font-family:monospace;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px" />
+      </label>
+      <button class="btn btn-ghost btn-sm" onclick="saveBusinessInfo()">Save key</button>
+      <span id="googleKeyStatus" style="font-size:0.8rem;color:var(--muted)"></span>
     </div>
   </div>
 
@@ -1919,6 +1929,52 @@ const ARROW = ' → ';
 let addrBox = null;          // the shared suggestion list (one on the page)
 let addrBias = null;         // [lon, lat] of the last address picked - nearby results first
 
+// Google address search, used instead of OpenStreetMap when a Google Maps
+// key is saved in Business Info. Loads Google's Maps script (Places
+// library) the first time it's needed. Google requires the "powered by
+// Google" mark under its suggestions.
+let gmapsPromise = null, gmapsKeyLoaded = null, gmapsAuthFailed = false;
+// Google calls this if it rejects the key (wrong key, API not enabled,
+// or this site not on the key's allowed list)
+window.gm_authFailure = () => { gmapsAuthFailed = true; };
+function googleMapsKey() { return ((state.businessInfo || {}).googleMapsKey || '').trim(); }
+function loadGooglePlaces(key) {
+  if (gmapsPromise && gmapsKeyLoaded === key) return gmapsPromise;
+  // Google's script can only be loaded once per page
+  if (gmapsKeyLoaded && gmapsKeyLoaded !== key) return Promise.reject(new Error('reload the page to use the new key'));
+  gmapsKeyLoaded = key;
+  gmapsPromise = new Promise((resolve, reject) => {
+    window.__gmapsReady = () => google.maps.importLibrary('places').then(resolve, reject);
+    const tag = document.createElement('script');
+    tag.src = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent(key) +
+      '&loading=async&v=weekly&callback=__gmapsReady';
+    tag.async = true;
+    tag.onerror = () => reject(new Error('could not load Google Maps'));
+    document.head.appendChild(tag);
+  });
+  return gmapsPromise;
+}
+// Up to 7 US address suggestions from Google for the typed text
+async function googleAddressSuggestions(text, session) {
+  // Gives up after 6 seconds so a stalled Google call falls back to OpenStreetMap
+  let timer;
+  const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('no answer from Google')), 6000); });
+  try { return await Promise.race([googleAddressLookup(text, session), timeout]); }
+  finally { clearTimeout(timer); }
+}
+async function googleAddressLookup(text, session) {
+  const places = await loadGooglePlaces(googleMapsKey());
+  if (gmapsAuthFailed) throw new Error('Google did not accept the key');
+  // One session token per lookup (until an address is picked) - how Google bills it
+  if (!session.token) session.token = new places.AutocompleteSessionToken();
+  const { suggestions } = await places.AutocompleteSuggestion.fetchAutocompleteSuggestions({
+    input: text, sessionToken: session.token, includedRegionCodes: ['us']
+  });
+  if (gmapsAuthFailed) throw new Error('Google did not accept the key');
+  return (suggestions || []).filter(x => x.placePrediction).slice(0, 7)
+    .map(x => ({ text: x.placePrediction.text.toString().replace(/, USA$/, '') }));
+}
+
 // Places from earlier trips: every From, and every stop in every To
 function usedTripPlaces() {
   const seen = new Map();
@@ -1962,6 +2018,7 @@ function attachAddressLookup(input, opts = {}) {
     window.addEventListener('resize', () => hideAddrBox());
   }
   let timer = null, controller = null, items = [], active = -1, query = '';
+  const session = {};   // Google session token, reset after each pick
 
   // The part of the box being looked up: in To, only the stop after the last arrow
   const split = () => {
@@ -1971,7 +2028,7 @@ function attachAddressLookup(input, opts = {}) {
     return m ? { prefix: m[1].replace(/\s*(?:→|->)\s*$/, ARROW), part: m[2] } : { prefix: '', part: v };
   };
 
-  const show = (list, note) => {
+  const show = (list, note, source) => {
     items = list; active = -1;
     if (!list.length && !note) { hideAddrBox(); return; }
     const used = list.filter(x => x.used), found = list.filter(x => !x.used);
@@ -1980,6 +2037,7 @@ function attachAddressLookup(input, opts = {}) {
     if (used.length) html += `<div class="addr-head">Used before</div>${rows(used)}`;
     if (found.length) html += `<div class="addr-head">Addresses</div>${rows(found)}`;
     if (note) html += `<div class="addr-note">${escHtml(note)}</div>`;
+    if (source === 'google' && found.length) html += `<div class="addr-note" style="text-align:right;font-size:0.75rem">powered by Google</div>`;
     addrBox.innerHTML = html;
     const r = input.getBoundingClientRect();
     addrBox.style.left = r.left + 'px';
@@ -1991,6 +2049,7 @@ function attachAddressLookup(input, opts = {}) {
       const { prefix } = split();
       input.value = prefix + items[i2].text;
       if (items[i2].coords) addrBias = items[i2].coords;
+      session.token = null;   // next lookup starts a new Google session
       hideAddrBox();
       input.focus();
     };
@@ -2022,6 +2081,20 @@ function attachAddressLookup(input, opts = {}) {
     show(used, 'Searching addresses…');
     if (controller) controller.abort();
     controller = new AbortController();
+    const seenUsed = new Set(used.map(x => x.text.toLowerCase()));
+    let fallbackNote = '';
+    if (googleMapsKey()) {
+      try {
+        const found = (await googleAddressSuggestions(part, session))
+          .filter(x => x.text && !seenUsed.has(x.text.toLowerCase()));
+        if (query !== part || document.activeElement !== input) return;   // typing moved on
+        show([...used, ...found], found.length || used.length ? '' : 'No matching addresses — you can type it in yourself.', 'google');
+        return;
+      } catch (err) {
+        // Fall through to OpenStreetMap, and say why
+        fallbackNote = `Google address search failed (${err.message}) — showing OpenStreetMap results.`;
+      }
+    }
     try {
       // Ask for extra, since non-US matches are dropped below
       const params = new URLSearchParams({ q: part, limit: '20', lang: 'en' });
@@ -2038,7 +2111,7 @@ function attachAddressLookup(input, opts = {}) {
       const found = features.slice(0, 7)
         .map(f => ({ text: formatPlace(f.properties), coords: f.geometry && f.geometry.coordinates }))
         .filter(x => x.text && !seen.has(x.text.toLowerCase()) && seen.add(x.text.toLowerCase()));
-      show([...used, ...found], found.length || used.length ? '' : 'No matching addresses — you can type it in yourself.');
+      show([...used, ...found], fallbackNote || (found.length || used.length ? '' : 'No matching addresses — you can type it in yourself.'));
     } catch (err) {
       if (err.name === 'AbortError') return;
       if (query === part && document.activeElement === input)
@@ -2582,12 +2655,18 @@ function renderBusinessInfo() {
   const phone = document.getElementById('businessInfoPhone');
   if (document.activeElement !== addr) addr.value = info.address || '';
   if (document.activeElement !== phone) phone.value = info.phone || '';
+  const gkey = document.getElementById('businessInfoGoogleKey');
+  if (document.activeElement !== gkey) gkey.value = info.googleMapsKey || '';
+  document.getElementById('googleKeyStatus').textContent = info.googleMapsKey
+    ? 'Trip addresses use Google.' : 'No key: trip addresses use OpenStreetMap.';
   document.getElementById('businessInfoWarning').style.display = (info.address || '').trim() ? 'none' : '';
 }
 function saveBusinessInfo() {
   state.businessInfo = {
+    ...(state.businessInfo || {}),
     address: document.getElementById('businessInfoAddress').value.trim(),
-    phone: document.getElementById('businessInfoPhone').value.trim()
+    phone: document.getElementById('businessInfoPhone').value.trim(),
+    googleMapsKey: document.getElementById('businessInfoGoogleKey').value.trim()
   };
   save(); odAutoSave();
   renderBusinessInfo();
