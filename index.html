@@ -2277,9 +2277,13 @@ function buildIncomeTaxes(a, status) {
   const beforeCredits = a.seTax + fedIncomeTax + addlMedicare + scIncomeTax;
   // Refundable credits (ACTC, EIC) can take the total below zero = a refund
   const total = a.seTax + fedAfterCtc + addlMedicare + scAfterCredits - actc - eitc;
+  // What's left after taxes: net profit (+ any wages and other income the
+  // household had) minus the total tax - plus the refund when it's negative
+  const income = a.netProfit + a.wages + a.otherIncome;
+  const takeHome = income - total;
   return { status, std, beforeQbi, qbi, qbiDeduction, overQbiThreshold, fedTaxable, fedIncomeTax,
            addlMedicare, sciad, scDependents, scTaxable, scIncomeTax, earned, eitc, ctcFull, ctcUsed,
-           actc, fedAfterCtc, scEitc, scAfterCredits, beforeCredits, total };
+           actc, fedAfterCtc, scEitc, scAfterCredits, beforeCredits, total, income, takeHome };
 }
 
 // Every number for one year - used by the page and the CSV export.
@@ -2368,7 +2372,8 @@ function renderAccounting() {
     <div class="summary-card"><div class="label">Est. Self-Employment Tax</div><div class="value">${fmtMoney(a.seTax)}</div></div>
     ${a.taxes ? (a.taxes.total >= 0
       ? `<div class="summary-card"><div class="label">Est. Total Tax</div><div class="value">${fmtMoney(a.taxes.total)}</div></div>`
-      : `<div class="summary-card"><div class="label">Est. Refund</div><div class="value">${fmtMoney(-a.taxes.total)}</div></div>`) : ''}`;
+      : `<div class="summary-card"><div class="label">Est. Refund</div><div class="value">${fmtMoney(-a.taxes.total)}</div></div>`) : ''}
+    ${a.taxes ? `<div class="summary-card"><div class="label">Est. Take-Home After Taxes</div><div class="value">${fmtMoney(a.taxes.takeHome)}</div></div>` : ''}`;
 
   // 1. Deposits
   document.getElementById('acctDeposits').innerHTML = (a.deposits.length ? `
@@ -2498,6 +2503,12 @@ function renderTaxes(a, line, muted) {
         ${t.total >= 0
           ? line('Total estimated tax' + muted(pct), fmtMoney(t.total), { total: true })
           : line('Estimated refund ' + muted('&mdash; your credits are more than your taxes'), fmtMoney(-t.total), { total: true })}
+
+        ${line('Take-home after taxes ' + muted((a.wages || a.otherIncome
+            ? `net profit ${fmtMoney(a.netProfit)} + wages and other income ${fmtMoney(a.wages + a.otherIncome)}`
+            : `net profit ${fmtMoney(a.netProfit)}`)
+            + (t.total >= 0 ? ` &minus; ${fmtMoney(t.total)} tax` : ` + ${fmtMoney(-t.total)} refund`)
+            + (t.total < 0 ? ' (the refund comes after you file)' : '')), fmtMoney(t.takeHome), { total: true })}
       </tbody>
     </table>
     <p style="color:var(--muted);font-size:0.8rem;margin:12px 0 0">
@@ -3068,7 +3079,8 @@ function exportAccountingCSV() {
       ['SC income tax', a.taxes.scIncomeTax.toFixed(2)],
       ['SC earned income credit', a.taxes.scEitc.toFixed(2)],
       ['Taxes before credits', a.taxes.beforeCredits.toFixed(2)],
-      [a.taxes.total >= 0 ? 'Total estimated tax' : 'Estimated refund', Math.abs(a.taxes.total).toFixed(2)]
+      [a.taxes.total >= 0 ? 'Total estimated tax' : 'Estimated refund', Math.abs(a.taxes.total).toFixed(2)],
+      ['Take-home after taxes', a.taxes.takeHome.toFixed(2)]
     ] : [['Federal / SC income tax', 'rules for ' + a.year + ' not in the app']]));
   const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
   const link = document.createElement('a');
