@@ -102,8 +102,9 @@
 
     /* ── Manual entry ── */
     .manual-row { display: flex; gap: 8px; flex-wrap: nowrap; align-items: flex-end; overflow-x: auto; }
-    /* Expense forms wrap onto a second line instead of hiding fields (like
-       the receipt picker and the Add button) off to the right. */
+    /* The Accounting expense form wraps onto a second line instead of
+       hiding fields (like the receipt picker and the Add button) off to
+       the right. */
     .manual-row.wrap { flex-wrap: wrap; overflow-x: visible; }
     /* Wide tables scroll inside their card rather than pushing the row's
        buttons off the edge of the page. */
@@ -625,7 +626,7 @@
   <!-- Add Expense -->
   <div class="card">
     <h2>Add Expense</h2>
-    <div class="manual-row wrap" id="addExpenseRow">
+    <div class="manual-row" id="addExpenseRow">
       <label>Client
         <select id="expenseClient"><option value="">— General —</option></select>
       </label>
@@ -649,9 +650,6 @@
       <label>Description
         <input id="expenseDescription" placeholder="Optional description" style="width:170px" />
       </label>
-      <label>Receipt <span style="font-size:0.75rem;color:var(--muted)">(optional)</span>
-        <input type="file" id="expenseReceipt" accept="image/*,application/pdf" style="font-size:0.8rem;max-width:210px" />
-      </label>
       <button class="btn btn-primary" onclick="addExpense()" style="align-self:flex-end">+ Log Expense</button>
     </div>
   </div>
@@ -665,10 +663,9 @@
         <select id="filterExpenseMonth" onchange="onFilterExpenseMonthChange()"><option value="">All Months</option></select>
       </div>
     </div>
-    <div id="expenseLogBody" class="table-scroll"></div>
+    <div id="expenseLogBody"></div>
     <div class="export-row" style="margin-top:14px">
       <button class="btn btn-ghost btn-sm" id="btnExportExpensesCSV" onclick="exportExpensesCSV()">Export Expenses CSV</button>
-      <button class="btn btn-ghost btn-sm" onclick="downloadExpenseLogReceipts(this)" title="Every receipt in the list above (with its filters), in one .zip">Download All Receipts</button>
       <button class="btn btn-ghost btn-sm" id="btnImportExpensesCSVBtn" onclick="document.getElementById('importExpensesCSVFile').click()">Import Expenses CSV</button>
       <input type="file" id="importExpensesCSVFile" accept=".csv" style="display:none" onchange="importExpensesCSV(event)" />
     </div>
@@ -1674,36 +1671,25 @@ function renderLog() {
 // ── Expenses ───────────────────────────────────────────
 const EXPENSE_CATEGORIES = ['Travel', 'Mileage', 'Meals', 'Software', 'Materials', 'Office', 'Other'];
 
-async function addExpense() {
+function addExpense() {
   const clientId = document.getElementById('expenseClient').value; // '' = general, no client
   const date = document.getElementById('expenseDate').value;
   const category = document.getElementById('expenseCategory').value;
   const amount = parseFloat(document.getElementById('expenseAmount').value);
   const description = document.getElementById('expenseDescription').value.trim();
-  const receiptInput = document.getElementById('expenseReceipt');
-  const receiptFile = receiptInput.files[0];
   if (!date) { alert('Pick a date.'); return; }
   if (!amount || amount <= 0) { alert('Enter a valid amount.'); return; }
-  // Receipts upload to OneDrive - check sign-in before saving anything
-  if (receiptFile && !odAccount) { alert('Please sign in to attach a receipt.'); return; }
   const client = clientId ? state.clients.find(c => c.id === clientId) : null;
-  const expense = {
+  state.expenses.unshift({
     id: uid(), clientId: clientId || '', clientName: client ? client.name : '',
     date, category, amount, description
-  };
-  state.expenses.unshift(expense);
+  });
   document.getElementById('expenseAmount').value = '';
   document.getElementById('expenseDescription').value = '';
-  receiptInput.value = '';
   save(); render(); odAutoSave();
-  // Expense is already saved; a failed upload just leaves it without a receipt
-  if (receiptFile) await attachReceipt(expense.id, receiptFile);
 }
 
 function deleteExpense(id) {
-  const ex = state.expenses.find(e => e.id === id);
-  // Only asks when there's a receipt, to say the file itself is kept
-  if (ex && ex.receipt && !confirm('Delete this expense? Its receipt file stays in your OneDrive Receipts folder.')) return;
   state.expenses = state.expenses.filter(e => e.id !== id);
   save(); render(); odAutoSave();
 }
@@ -1728,7 +1714,6 @@ function editExpense(id) {
     <td><select id="eed-category" style="${s}">${categoryOptions}</select></td>
     <td><input type="text" value="${escHtml(e.description || '')}" id="eed-desc" placeholder="Description" style="${s};width:160px"></td>
     <td><input type="number" value="${e.amount}" id="eed-amount" min="0" step="0.01" style="${s};width:90px"></td>
-    <td data-receipt-cell>${receiptCellHtml(e)}</td>
     <td style="display:flex;gap:6px;padding:6px 10px">
       <button class="btn btn-primary btn-sm" onclick="saveExpense('${id}')">Save</button>
       <button class="btn btn-ghost btn-sm" onclick="renderExpenseLog()">Cancel</button>
@@ -1765,20 +1750,15 @@ function renderExpenseMonthFilter() {
   if (prev) el.value = prev;
 }
 
-// The Expense Log's rows, with its client and month filters applied
-// (also what "Download All Receipts" on that tab downloads).
-function filteredExpenseLog() {
+function renderExpenseLog() {
   const filterClient = document.getElementById('filterExpenseClient').value;
   const filterMonth  = document.getElementById('filterExpenseMonth').value;
+
   let expenses = activeState().expenses;
   if (filterClient === '__general__') expenses = expenses.filter(e => !e.clientId);
   else if (filterClient) expenses = expenses.filter(e => e.clientId === filterClient);
   if (filterMonth) expenses = expenses.filter(e => e.date.startsWith(filterMonth));
-  return [...expenses].sort((a, b) => b.date.localeCompare(a.date));
-}
-
-function renderExpenseLog() {
-  const expenses = filteredExpenseLog();
+  expenses = [...expenses].sort((a, b) => b.date.localeCompare(a.date));
 
   const body = document.getElementById('expenseLogBody');
   if (!expenses.length) { body.innerHTML = '<p class="empty">No expenses yet.</p>'; return; }
@@ -1786,7 +1766,7 @@ function renderExpenseLog() {
   body.innerHTML = `
     <table>
       <thead><tr>
-        <th>Date</th><th>Client</th><th>Category</th><th>Description</th><th>Amount</th><th>Receipt</th><th></th>
+        <th>Date</th><th>Client</th><th>Category</th><th>Description</th><th>Amount</th><th></th>
       </tr></thead>
       <tbody>
         ${expenses.map(e => `
@@ -1796,10 +1776,9 @@ function renderExpenseLog() {
             <td>${escHtml(e.category)}</td>
             <td>${escHtml(e.description) || '<span style="color:var(--muted)">—</span>'}</td>
             <td class="amount">${fmtMoney(e.amount)}</td>
-            <td data-receipt-cell>${receiptCellHtml(e, teamViewActive)}</td>
-            <td style="display:flex;gap:6px;align-items:center">
+            <td style="display:flex;gap:4px">
               ${teamViewActive ? '' : `
-              <button class="btn btn-ghost btn-sm" onclick="editExpense('${e.id}')" title="Edit this expense">Edit</button>
+              <button class="del-row" onclick="editExpense('${e.id}')" title="Edit" style="color:var(--accent)">✎</button>
               <button class="del-row" onclick="deleteExpense('${e.id}')" title="Delete">×</button>`}
             </td>
           </tr>`).join('')}
@@ -2084,21 +2063,21 @@ async function addBusinessExpense() {
 // OneDrive, and the expense keeps only a small reference to it
 // ({fileName, driveItemId, webUrl}), never the file itself.
 
-// Receipt cell for one expense row (business or client): View link +
-// Download + Replace, or Attach. readOnly (Team View) shows only View and
-// Download.
-function receiptCellHtml(e, readOnly) {
+// Receipt cell for one business expense row: View link + Download +
+// Replace, or Attach. (Receipts are Accounting-tab only; the client
+// Expenses tab has none.)
+function receiptCellHtml(e) {
   const picker = label => `
     <label class="btn btn-ghost btn-sm" style="cursor:pointer" title="${e.receipt ? 'Replace the receipt' : 'Attach a receipt (photo or PDF)'}">${label}
       <input type="file" accept="image/*,application/pdf" style="display:none" onchange="attachReceipt('${e.id}', this.files[0])" />
     </label>`;
-  if (!e.receipt) return readOnly ? '<span style="color:var(--muted)">&mdash;</span>' : picker('Attach');
+  if (!e.receipt) return picker('Attach');
   return `<div style="display:flex;gap:4px;align-items:center">
       <a href="${escHtml(e.receipt.webUrl)}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm"
          title="${escHtml(e.receipt.fileName)}" style="color:var(--accent2);text-decoration:none;white-space:nowrap">&#128206; View</a>
       <button class="btn btn-ghost btn-sm" onclick="downloadReceipt('${e.id}', this)"
          title="Save ${escHtml(e.receipt.fileName)} to this computer" style="white-space:nowrap">Download</button>
-      ${readOnly ? '' : picker('Replace')}
+      ${picker('Replace')}
     </div>`;
 }
 
@@ -2107,8 +2086,7 @@ function receiptCellHtml(e, readOnly) {
 // View, where the receipt is in the teammate's OneDrive, not this account's)
 // it is read through its share link instead.
 async function downloadReceipt(id, btn) {
-  const st = activeState();
-  const e = (st.businessExpenses || []).find(x => x.id === id) || (st.expenses || []).find(x => x.id === id);
+  const e = state.businessExpenses.find(x => x.id === id);
   if (!e || !e.receipt) return;
   if (!odAccount) { alert('Please sign in to download the receipt.'); return; }
   const label = btn ? btn.textContent : '';
@@ -2257,11 +2235,6 @@ function downloadAccountingReceipts(btn) {
   const year = document.getElementById('acctYear').value;
   return downloadAllReceipts(buildAccounting(year).expenses, `Cirrobound receipts ${year}.zip`, btn);
 }
-// Expenses tab: the receipts in the Expense Log as currently filtered
-function downloadExpenseLogReceipts(btn) {
-  const month = document.getElementById('filterExpenseMonth').value;
-  return downloadAllReceipts(filteredExpenseLog(), `Expense receipts${month ? ' ' + month : ''}.zip`, btn);
-}
 
 // Uploads the file and returns its reference. The OneDrive name starts with
 // the expense's date and id so two receipts called "receipt.pdf" never
@@ -2279,15 +2252,13 @@ async function uploadReceiptFile(expense, file) {
   return { fileName: file.name, driveItemId: item.id, webUrl: item.webUrl };
 }
 
-// Attach (or replace) the receipt on one expense - a business expense
-// (Accounting tab) or a client expense (Expenses tab). Ids are unique
-// across both lists.
+// Attach (or replace) the receipt on one business expense.
 async function attachReceipt(id, file) {
   if (!file) return;
   if (!odAccount) { alert('Please sign in to attach a receipt.'); return; }
-  const e = state.businessExpenses.find(x => x.id === id) || state.expenses.find(x => x.id === id);
+  const e = state.businessExpenses.find(x => x.id === id);
   if (!e) return;
-  const cell = document.querySelector(`tr[data-bizexpid="${id}"] [data-receipt-cell], tr[data-expid="${id}"] [data-receipt-cell]`);
+  const cell = document.querySelector(`tr[data-bizexpid="${id}"] [data-receipt-cell]`);
   if (cell) cell.innerHTML = '<span style="color:var(--muted);font-size:0.85rem">Uploading&hellip;</span>';
   try {
     e.receipt = await uploadReceiptFile(e, file);
@@ -2296,7 +2267,6 @@ async function attachReceipt(id, file) {
     alert('Receipt upload failed: ' + err.message + '\n\nThe expense is saved; try attaching the receipt again from its row (a PDF or a smaller photo may help).');
   }
   renderAccounting();
-  renderExpenseLog();
 }
 
 function deleteBusinessExpense(id) {
@@ -2962,8 +2932,8 @@ function exportExpensesCSV() {
   const filterMonth = document.getElementById('filterExpenseMonth').value;
   let expenses = filterMonth ? activeState().expenses.filter(e => e.date.startsWith(filterMonth)) : activeState().expenses;
 
-  const rows = [['Date', 'Client', 'Category', 'Description', 'Amount ($)', 'Receipt']];
-  expenses.forEach(e => rows.push([e.date, e.clientName || '', e.category, e.description || '', e.amount.toFixed(2), e.receipt ? e.receipt.fileName : '']));
+  const rows = [['Date', 'Client', 'Category', 'Description', 'Amount ($)']];
+  expenses.forEach(e => rows.push([e.date, e.clientName || '', e.category, e.description || '', e.amount.toFixed(2)]));
 
   const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
   const a = document.createElement('a');
