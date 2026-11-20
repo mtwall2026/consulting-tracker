@@ -829,8 +829,15 @@
       <label id="bizExpAmountField">Amount
         <input type="number" id="bizExpAmount" placeholder="0.00" min="0" step="0.01" style="width:100px" oninput="updateBizExpFields()" />
       </label>
-      <!-- Car & Mileage only: business miles x the mileage rate is the
-           expense, so Amount is hidden and worked out from these. -->
+      <!-- Car & Mileage only: where the trip started and went (the mileage
+           log), and business miles x the mileage rate is the expense, so
+           Amount is hidden and worked out from these. -->
+      <label id="bizExpFromField" style="display:none">From
+        <input id="bizExpFrom" placeholder="e.g. Home office" style="width:150px" />
+      </label>
+      <label id="bizExpToField" style="display:none">To
+        <input id="bizExpTo" placeholder="e.g. Client A office &rarr; back" style="width:190px" />
+      </label>
       <label id="bizExpMilesField" style="display:none">Miles
         <input type="number" id="bizExpMiles" placeholder="0" min="0" step="0.1" style="width:80px" oninput="updateBizExpFields()" />
       </label>
@@ -844,7 +851,7 @@
         <input type="number" id="bizExpBusinessPct" placeholder="e.g. 60" min="0" max="100" step="1" style="width:80px" oninput="updateBizExpFields()" />
         <span id="bizExpPctNote" style="font-size:0.75rem;color:var(--muted)"></span>
       </label>
-      <label>Description
+      <label><span id="bizExpDescLabel">Description</span>
         <input id="bizExpDescription" placeholder="What it was for" style="width:200px" />
       </label>
       <label>Receipt <span style="font-size:0.75rem;color:var(--muted)">(optional)</span>
@@ -853,10 +860,11 @@
       <button class="btn btn-primary" onclick="addBusinessExpense()" style="align-self:flex-end">+ Add Expense</button>
     </div>
     <p style="margin:10px 0 0;font-size:0.8rem;color:var(--muted)">Internet: enter the full bill as the amount and that month's business-use %; only that share counts as an expense.</p>
-    <p style="margin:4px 0 0;font-size:0.8rem;color:var(--muted)">Car &amp; Mileage: enter the business miles (say where and why in Description); they count at the mileage rate. The rate covers gas and other running costs, so don't also enter gas for the same car. Parking and tolls can still go in on their own.</p>
+    <p style="margin:4px 0 0;font-size:0.8rem;color:var(--muted)">Car &amp; Mileage: enter where you drove from and to, the total business miles, and the purpose; the miles count at the mileage rate. For several stops, list them in To (e.g. "Client A office &rarr; Client B office &rarr; back"). The rate covers gas and other running costs, so don't also enter gas for the same car. Parking and tolls can still go in on their own.</p>
     <div id="internetRuleWarning" style="display:none;background:#3a2e12;border:1px solid #b8860b;color:#fbbf24;border-radius:6px;padding:8px 12px;font-size:0.85rem;margin-top:8px"></div>
     <div id="acctExpenses" class="table-scroll" style="margin-top:14px"></div>
     <div class="export-row" style="margin-top:14px">
+      <button class="btn btn-ghost btn-sm" onclick="downloadMileageLog()" title="This year's Car &amp; Mileage trips as a spreadsheet (CSV)">Download Mileage Log</button>
       <button class="btn btn-ghost btn-sm" onclick="downloadAccountingReceipts(this)" title="Every receipt for this year's business expenses, in one .zip">Download All Receipts</button>
     </div>
   </div>
@@ -1886,6 +1894,10 @@ const isMileage = e => e.category === MILEAGE_CATEGORY && typeof e.miles === 'nu
 function mileageAmount(miles, rate) { return Math.round(miles * rate * 100) / 100; }
 // Reads a positive number box, or null
 function readPositive(el) { const n = parseFloat(el.value); return n > 0 ? n : null; }
+// "Home office -> Client A office" for a trip, or '' if neither end is set
+function tripRoute(e) {
+  return e.from || e.to ? `${e.from || '?'} \u2192 ${e.to || '?'}` : '';
+}
 // "120 mi" / "1,234.5 mi"
 function fmtMiles(n) { return `${n.toLocaleString('en-US', { maximumFractionDigits: 1 })} mi`; }
 
@@ -2006,7 +2018,9 @@ function renderAccounting() {
             <td>${fmtDate(e.date)}</td>
             <td>${escHtml(e.category)}${e.category === 'Internet' ? ' ' + internetRowNote(e) : ''}${isMileage(e)
               ? ' ' + muted(`(${fmtMiles(e.miles)} &times; $${e.mileRate.toFixed(3).replace(/0$/, '')}/mi)`) : ''}</td>
-            <td>${escHtml(e.description) || muted('&mdash;')}</td>
+            <td>${tripRoute(e)
+              ? `${escHtml(tripRoute(e))}${e.description ? `<br>${muted(escHtml(e.description))}` : ''}`
+              : escHtml(e.description) || muted('&mdash;')}</td>
             <td class="amount" style="text-align:right">${fmtMoney(e.amount)}</td>
             <td data-receipt-cell>${receiptCellHtml(e)}</td>
             <td style="display:flex;gap:6px;align-items:center">
@@ -2060,6 +2074,9 @@ async function addBusinessExpense() {
   const mileage = category === MILEAGE_CATEGORY;
   const miles = mileage ? readPositive(document.getElementById('bizExpMiles')) : null;
   const mileRate = mileage ? readPositive(document.getElementById('bizExpMileRate')) : null;
+  const from = mileage ? document.getElementById('bizExpFrom').value.trim() : '';
+  const to = mileage ? document.getElementById('bizExpTo').value.trim() : '';
+  if (mileage && (!from || !to)) { alert('Enter where the trip started (From) and where you went (To).'); return; }
   if (mileage && miles === null) { alert('Enter the business miles driven.'); return; }
   if (mileage && mileRate === null) { alert('Enter the mileage rate in dollars per mile (e.g. 0.76).'); return; }
   const amount = mileage ? mileageAmount(miles, mileRate) : parseFloat(document.getElementById('bizExpAmount').value);
@@ -2075,12 +2092,14 @@ async function addBusinessExpense() {
   if (receiptFile && !odAccount) { alert('Please sign in to attach a receipt.'); return; }
   const expense = { id: uid(), date, category, amount, description };
   if (businessPct !== null) expense.businessPct = businessPct;
-  if (mileage) { expense.miles = miles; expense.mileRate = mileRate; }
+  if (mileage) { expense.miles = miles; expense.mileRate = mileRate; expense.from = from; expense.to = to; }
   state.businessExpenses.unshift(expense);
   document.getElementById('bizExpAmount').value = '';
   document.getElementById('bizExpDescription').value = '';
   pctInput.value = '';
-  document.getElementById('bizExpMiles').value = '';   // the rate stays for the next trip
+  // The rate and the From place stay for the next trip
+  document.getElementById('bizExpMiles').value = '';
+  document.getElementById('bizExpTo').value = '';
   updateBizExpFields();
   receiptInput.value = '';
   // Jump the page to the year just entered so the new expense is visible
@@ -2330,7 +2349,11 @@ function editBusinessExpense(id) {
         <input type="number" id="bed-miles" value="${isMileage(e) ? e.miles : ''}" min="0" step="0.1" placeholder="miles" title="Business miles" oninput="updateBedFields()" style="${st};width:70px;margin-top:4px"> mi &times;
         $<input type="number" id="bed-rate" value="${isMileage(e) ? e.mileRate : MILEAGE_RATE_DEFAULT}" min="0" step="0.005" title="Rate in dollars per mile" oninput="updateBedFields()" style="${st};width:65px;margin-top:4px">/mi
       </span></td>
-    <td><input type="text" id="bed-desc" value="${escHtml(e.description)}" style="${st};width:180px"></td>
+    <td><span id="bed-route-wrap" style="display:${e.category === MILEAGE_CATEGORY ? 'block' : 'none'};margin-bottom:4px;white-space:nowrap">
+        <input type="text" id="bed-from" value="${escHtml(e.from || '')}" placeholder="From" title="Where the trip started" style="${st};width:110px"> &rarr;
+        <input type="text" id="bed-to" value="${escHtml(e.to || '')}" placeholder="To" title="Where you went" style="${st};width:130px">
+      </span>
+      <input type="text" id="bed-desc" value="${escHtml(e.description)}" placeholder="${e.category === MILEAGE_CATEGORY ? 'Business purpose' : ''}" style="${st};width:180px"></td>
     <td><input type="number" id="bed-amount" value="${e.amount}" min="0" step="0.01" style="${st};width:100px" ${e.category === MILEAGE_CATEGORY ? 'disabled title="Worked out from miles x rate"' : ''}></td>
     <td data-receipt-cell>${receiptCellHtml(e)}</td>
     <td style="display:flex;gap:6px">
@@ -2345,6 +2368,8 @@ function updateBedFields() {
   const isMiles = category === MILEAGE_CATEGORY;
   document.getElementById('bed-pct-wrap').style.display = category === 'Internet' ? '' : 'none';
   document.getElementById('bed-miles-wrap').style.display = isMiles ? '' : 'none';
+  document.getElementById('bed-route-wrap').style.display = isMiles ? 'block' : 'none';
+  document.getElementById('bed-desc').placeholder = isMiles ? 'Business purpose' : '';
   const amountInput = document.getElementById('bed-amount');
   amountInput.disabled = isMiles;
   if (isMiles) {
@@ -2362,6 +2387,9 @@ function saveBusinessExpense(id) {
   const mileage = category === MILEAGE_CATEGORY;
   const miles = mileage ? readPositive(document.getElementById('bed-miles')) : null;
   const mileRate = mileage ? readPositive(document.getElementById('bed-rate')) : null;
+  const from = mileage ? document.getElementById('bed-from').value.trim() : '';
+  const to = mileage ? document.getElementById('bed-to').value.trim() : '';
+  if (mileage && (!from || !to)) { alert('Enter where the trip started (From) and where you went (To).'); return; }
   if (mileage && miles === null) { alert('Enter the business miles driven.'); return; }
   if (mileage && mileRate === null) { alert('Enter the mileage rate in dollars per mile (e.g. 0.76).'); return; }
   const amount = mileage ? mileageAmount(miles, mileRate) : parseFloat(document.getElementById('bed-amount').value);
@@ -2374,7 +2402,8 @@ function saveBusinessExpense(id) {
   e.amount = amount;
   // Only Internet bills carry a business-use %, only mileage miles + rate
   if (businessPct !== null) e.businessPct = businessPct; else delete e.businessPct;
-  if (mileage) { e.miles = miles; e.mileRate = mileRate; } else { delete e.miles; delete e.mileRate; }
+  if (mileage) { e.miles = miles; e.mileRate = mileRate; e.from = from; e.to = to; }
+  else { delete e.miles; delete e.mileRate; delete e.from; delete e.to; }
   save(); odAutoSave();
   renderAccounting();
 }
@@ -2425,6 +2454,17 @@ function updateBizExpFields() {
   document.getElementById('bizExpAmountField').style.display = isMiles ? 'none' : '';
   document.getElementById('bizExpMilesField').style.display = isMiles ? '' : 'none';
   document.getElementById('bizExpRateField').style.display = isMiles ? '' : 'none';
+  document.getElementById('bizExpFromField').style.display = isMiles ? '' : 'none';
+  document.getElementById('bizExpToField').style.display = isMiles ? '' : 'none';
+  // For a trip the description is its business purpose
+  document.getElementById('bizExpDescLabel').textContent = isMiles ? 'Business purpose' : 'Description';
+  document.getElementById('bizExpDescription').placeholder = isMiles ? 'e.g. Design review' : 'What it was for';
+  // Start From on the last trip's starting point (usually the same place)
+  const fromInput = document.getElementById('bizExpFrom');
+  if (isMiles && fromInput.value === '') {
+    const last = state.businessExpenses.find(x => isMileage(x) && x.from);
+    if (last) fromInput.value = last.from;
+  }
   const rateInput = document.getElementById('bizExpMileRate');
   if (isMiles && rateInput.value === '') rateInput.value = MILEAGE_RATE_DEFAULT;
   const miles = readPositive(document.getElementById('bizExpMiles'));
@@ -2450,6 +2490,25 @@ function saveAccountingYearInputs() {
   renderAccounting();
 }
 
+// Mileage log for the selected year, as a CSV (opens in Excel): one row
+// per trip, oldest first - date, from, to, purpose, miles, rate, amount -
+// with totals. This is the record the IRS asks for with the per-mile rate.
+function downloadMileageLog() {
+  const a = buildAccounting(document.getElementById('acctYear').value);
+  const trips = a.expenses.filter(isMileage).reverse();
+  if (!trips.length) { alert(`No Car & Mileage trips entered for ${a.year}.`); return; }
+  const rows = [[`Cirrobound Solutions - Mileage Log ${a.year}`], [],
+    ['Date', 'From', 'To', 'Business purpose', 'Miles', 'Rate ($/mi)', 'Amount ($)']];
+  trips.forEach(e => rows.push([e.date, e.from || '', e.to || '', e.description || '', e.miles, e.mileRate, e.amount.toFixed(2)]));
+  const totalMiles = Math.round(trips.reduce((n, e) => n + e.miles, 0) * 10) / 10;
+  const totalAmount = trips.reduce((n, e) => n + e.amount, 0);
+  rows.push([], ['', '', '', `Total (${trips.length} trip${trips.length === 1 ? '' : 's'})`, totalMiles, '', totalAmount.toFixed(2)]);
+  const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+  // The leading byte-order mark tells Excel the file is UTF-8, so arrows
+  // and accented names in From/To show correctly
+  saveBlobAs(new Blob(['﻿' + csv], { type: 'text/csv' }), `cirrobound-mileage-log-${a.year}.csv`);
+}
+
 // Year's books as a CSV for the accountant.
 function exportAccountingCSV() {
   const a = buildAccounting(document.getElementById('acctYear').value);
@@ -2457,9 +2516,9 @@ function exportAccountingCSV() {
     ['1. REVENUE - DEPOSITS'], ['Date Received', 'Invoice #', 'From', 'Amount ($)']];
   a.deposits.forEach(r => rows.push([invoicePaidDateStr(r), r.invoiceNum, r.clientName, invoiceRecordTotal(r).toFixed(2)]));
   rows.push(['', '', 'Total deposits', a.revenue.toFixed(2)], [],
-    ['2. BUSINESS EXPENSES'], ['Date', 'Category', 'Description', 'Amount ($)', 'Deductible ($)', 'Receipt', 'Miles', 'Rate ($/mi)']);
+    ['2. BUSINESS EXPENSES'], ['Date', 'Category', 'Description', 'Amount ($)', 'Deductible ($)', 'Receipt', 'Miles', 'Rate ($/mi)', 'From', 'To']);
   [...a.expenses].reverse().forEach(e => rows.push([e.date, e.category, e.description || '', e.amount.toFixed(2), (e.amount * deductiblePct(e)).toFixed(2), e.receipt ? e.receipt.fileName : '',
-    isMileage(e) ? e.miles : '', isMileage(e) ? e.mileRate : '']));
+    isMileage(e) ? e.miles : '', isMileage(e) ? e.mileRate : '', e.from || '', e.to || '']));
   rows.push(['', '', 'Total', a.spent.toFixed(2), a.deductible.toFixed(2)], [],
     ['3. AGI'],
     ['Net profit', a.netProfit.toFixed(2)],
