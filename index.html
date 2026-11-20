@@ -821,7 +821,7 @@
     <h2>2 &middot; Business Expenses</h2>
     <div class="manual-row wrap">
       <label>Date
-        <input type="date" id="bizExpDate" />
+        <input type="date" id="bizExpDate" onchange="setBizExpRateFromDate(); updateBizExpFields()" />
       </label>
       <label>Category
         <select id="bizExpCategory" onchange="updateBizExpFields()"></select>
@@ -847,6 +847,7 @@
       </label>
       <label id="bizExpRateField" style="display:none">Rate $/mile
         <input type="number" id="bizExpMileRate" min="0" step="0.005" style="width:80px" oninput="updateBizExpFields()" />
+        <span id="bizExpRateNote" style="font-size:0.7rem;color:var(--muted)"></span>
         <span id="bizExpMilesNote" style="font-size:0.75rem;color:var(--muted)"></span>
       </label>
       <!-- Internet only: the full bill goes in Amount, and this month's
@@ -864,7 +865,8 @@
       <button class="btn btn-primary" onclick="addBusinessExpense()" style="align-self:flex-end">+ Add Expense</button>
     </div>
     <p style="margin:10px 0 0;font-size:0.8rem;color:var(--muted)">Internet: enter the full bill as the amount and that month's business-use %; only that share counts as an expense.</p>
-    <p style="margin:4px 0 0;font-size:0.8rem;color:var(--muted)">Car &amp; Mileage: enter where you drove from and to, the miles and the purpose; the miles count at the mileage rate. Leave <b>Round trip</b> ticked to go there and back: enter the one-way miles and they're doubled. For a one-way trip or a day with several stops, untick it and enter the total miles; list the stops in To separated by &rarr; (type "-&gt;" and it becomes &rarr;). Type an address any way (e.g. "123 main st houston tx 77002") and it's tidied into the standard form "123 Main St, Houston, TX 77002" when you leave the box; a name like "Home office" is left as you typed it. The rate covers gas and other running costs, so don't also enter gas for the same car. Parking and tolls can still go in on their own.</p>
+    <p style="margin:4px 0 0;font-size:0.8rem;color:var(--muted)">Car &amp; Mileage: enter where you drove from and to, the miles and the purpose; the miles count at the IRS mileage rate for the trip's date, filled in for you (2026: $0.725 through June 30, $0.76 from July 1). Leave <b>Round trip</b> ticked to go there and back: enter the one-way miles and they're doubled. For a one-way trip or a day with several stops, untick it and enter the total miles; list the stops in To separated by &rarr; (type "-&gt;" and it becomes &rarr;). Type an address any way (e.g. "123 main st houston tx 77002") and it's tidied into the standard form "123 Main St, Houston, TX 77002" when you leave the box; a name like "Home office" is left as you typed it. The rate covers gas and other running costs, so don't also enter gas for the same car. Parking and tolls can still go in on their own.</p>
+    <div id="mileageRateWarning" style="display:none;background:#3a2e12;border:1px solid #b8860b;color:#fbbf24;border-radius:6px;padding:8px 12px;font-size:0.85rem;margin-top:8px"></div>
     <div id="internetRuleWarning" style="display:none;background:#3a2e12;border:1px solid #b8860b;color:#fbbf24;border-radius:6px;padding:8px 12px;font-size:0.85rem;margin-top:8px"></div>
     <div id="acctExpenses" class="table-scroll" style="margin-top:14px"></div>
     <div class="export-row" style="margin-top:14px">
@@ -1891,11 +1893,39 @@ function deductiblePct(e) {
   return 1;
 }
 // Mileage rule: business driving is deducted per mile, not by gas
-// receipts. Taylor's rate is 76 cents a mile; the form starts on it and
-// each trip keeps the rate it was entered with (expense.mileRate), so a
-// new rate in a later year never changes old trips.
+// receipts, at the IRS standard business rate IN EFFECT ON THE TRIP'S DATE.
+// The form fills the rate in from the date; each trip keeps the rate it was
+// saved with (expense.mileRate), and trips whose rate doesn't match their
+// date are flagged with a one-click fix.
 const MILEAGE_CATEGORY = 'Car & Mileage';
-const MILEAGE_RATE_DEFAULT = 0.76;
+// IRS business standard mileage rates, newest last. Add a line when the IRS
+// announces a new rate (usually in December; 2026 also changed on July 1).
+const MILEAGE_RATES = [
+  { from: '2023-01-01', rate: 0.655 },   // Notice 2023-03
+  { from: '2024-01-01', rate: 0.67 },    // Notice 2024-08
+  { from: '2025-01-01', rate: 0.70 },    // Notice 2025-05
+  { from: '2026-01-01', rate: 0.725 },   // Notice 2026-10
+  { from: '2026-07-01', rate: 0.76 }     // Announcement 2026-11 (fuel prices)
+];
+// The IRS rate for a trip date ('YYYY-MM-DD'), or null before the table.
+// Dates in a year past the table use the latest rate (see mileageRateKnown).
+function mileageRateFor(date) {
+  let found = null;
+  MILEAGE_RATES.forEach(r => { if ((date || '') >= r.from) found = r.rate; });
+  return found;
+}
+// False when the date is in a year the table doesn't cover yet
+function mileageRateKnown(date) {
+  const lastYear = MILEAGE_RATES[MILEAGE_RATES.length - 1].from.slice(0, 4);
+  return !!date && date >= MILEAGE_RATES[0].from && date.slice(0, 4) <= lastYear;
+}
+// "$0.725" / "$0.76"
+const fmtRate = r => '$' + r.toFixed(3).replace(/0$/, '');
+// A trip whose saved rate isn't the IRS rate for its date
+function mileageRateOff(e) {
+  const irs = mileageRateFor(e.date);
+  return isMileage(e) && irs !== null && mileageRateKnown(e.date) && Math.abs(e.mileRate - irs) > 1e-9;
+}
 const isMileage = e => e.category === MILEAGE_CATEGORY && typeof e.miles === 'number';
 // Miles x rate, to the cent
 function mileageAmount(miles, rate) { return Math.round(miles * rate * 100) / 100; }
@@ -2175,7 +2205,8 @@ function renderAccounting() {
           <tr data-bizexpid="${e.id}">
             <td>${fmtDate(e.date)}</td>
             <td>${escHtml(e.category)}${e.category === 'Internet' ? ' ' + internetRowNote(e) : ''}${isMileage(e)
-              ? ' ' + muted(`(${fmtMiles(e.miles)}${e.roundTrip ? ' round trip' : ''} &times; $${e.mileRate.toFixed(3).replace(/0$/, '')}/mi)`) : ''}</td>
+              ? ' ' + muted(`(${fmtMiles(e.miles)}${e.roundTrip ? ' round trip' : ''} &times; ${fmtRate(e.mileRate)}/mi)`)
+                + (mileageRateOff(e) ? ` <span style="color:#fbbf24;font-size:0.8rem">(IRS rate for this date is ${fmtRate(mileageRateFor(e.date))})</span>` : '') : ''}</td>
             <td>${tripRoute(e)
               ? `${escHtml(tripRoute(e))}${e.description ? `<br>${muted(escHtml(e.description))}` : ''}`
               : escHtml(e.description) || muted('&mdash;')}</td>
@@ -2201,6 +2232,7 @@ function renderAccounting() {
     : line(muted('No expenses yet'), fmtMoney(0), { indent: true });
   renderBusinessInfo();
   renderInternetRule(a);
+  renderMileageRateWarning(a);
   document.getElementById('acctAgi').innerHTML = `
     <table>
       <tbody>
@@ -2502,7 +2534,7 @@ function editBusinessExpense(id) {
   if (!tr || !e) return;
   const st = 'background:var(--surface2);border:1px solid var(--border);border-radius:5px;color:var(--text);padding:4px 6px;font-size:0.82rem';
   tr.innerHTML = `
-    <td><input type="date" id="bed-date" value="${e.date}" style="${st};width:130px"></td>
+    <td><input type="date" id="bed-date" value="${e.date}" onchange="setBedRateFromDate()" style="${st};width:130px"></td>
     <td><select id="bed-category" style="${st}" onchange="updateBedFields()">${businessCategoryOptionsHtml(e.category)}</select>
       <span id="bed-pct-wrap" style="display:${e.category === 'Internet' ? '' : 'none'};white-space:nowrap">
         <input type="number" id="bed-pct" value="${internetPctOf(e) === null ? '' : internetPctOf(e)}" min="0" max="100" step="1" placeholder="%" title="Business-use % for this bill" style="${st};width:60px;margin-top:4px"> % business
@@ -2510,7 +2542,7 @@ function editBusinessExpense(id) {
       <span id="bed-miles-wrap" style="display:${e.category === MILEAGE_CATEGORY ? '' : 'none'};white-space:nowrap">
         <label style="cursor:pointer;font-size:0.8rem" title="Miles are one way and doubled"><input type="checkbox" id="bed-round" ${e.roundTrip ? 'checked' : ''} onchange="toggleBedRoundTrip()"> Round trip</label><br>
         <input type="number" id="bed-miles" value="${isMileage(e) ? (e.roundTrip ? e.miles / 2 : e.miles) : ''}" min="0" step="0.1" placeholder="miles" title="Business miles" oninput="updateBedFields()" style="${st};width:70px;margin-top:4px"> <span id="bed-miles-unit">${e.roundTrip ? 'mi each way' : 'mi'}</span> &times;
-        $<input type="number" id="bed-rate" value="${isMileage(e) ? e.mileRate : MILEAGE_RATE_DEFAULT}" min="0" step="0.005" title="Rate in dollars per mile" oninput="updateBedFields()" style="${st};width:65px;margin-top:4px">/mi
+        $<input type="number" id="bed-rate" value="${isMileage(e) ? e.mileRate : (mileageRateFor(e.date) || '')}" min="0" step="0.005" title="Rate in dollars per mile" oninput="updateBedFields()" style="${st};width:65px;margin-top:4px">/mi
       </span></td>
     <td><span id="bed-route-wrap" style="display:${e.category === MILEAGE_CATEGORY ? 'block' : 'none'};margin-bottom:4px;white-space:nowrap">
         <input type="text" id="bed-from" value="${escHtml(e.from || '')}" placeholder="From" title="Where the trip started" autocomplete="off" style="${st};width:150px"> &rarr;
@@ -2538,6 +2570,8 @@ function updateBedFields() {
   const amountInput = document.getElementById('bed-amount');
   amountInput.disabled = isMiles;
   if (isMiles) {
+    const rateBox = document.getElementById('bed-rate');
+    if (rateBox.value === '') { const irs = mileageRateFor(document.getElementById('bed-date').value); if (irs !== null) rateBox.value = irs; }
     const round = document.getElementById('bed-round').checked;
     document.getElementById('bed-miles-unit').textContent = round ? 'mi each way' : 'mi';
     const typed = readPositive(document.getElementById('bed-miles'));
@@ -2545,6 +2579,12 @@ function updateBedFields() {
     const rate = readPositive(document.getElementById('bed-rate'));
     amountInput.value = miles !== null && rate !== null ? mileageAmount(miles, rate) : '';
   }
+}
+// Edit row: changing the date puts in the IRS rate for the new date
+function setBedRateFromDate() {
+  const irs = mileageRateFor(document.getElementById('bed-date').value);
+  if (irs !== null) document.getElementById('bed-rate').value = irs;
+  updateBedFields();
 }
 // Edit row: ticking / unticking Round trip converts the miles box between
 // "each way" and "total", so the trip's total miles don't change by accident
@@ -2613,12 +2653,45 @@ function internetRowNote(e) {
   return `<span style="color:var(--muted);font-size:0.8rem">(${pct}% business &mdash; ${fmtMoney(e.amount * pct / 100)} counts)</span>`;
 }
 
+// Warning while any of the year's trips uses a rate other than the IRS
+// rate for its date, with a button that puts each on its date's rate.
+function renderMileageRateWarning(a) {
+  const off = a.expenses.filter(mileageRateOff);
+  const warn = document.getElementById('mileageRateWarning');
+  warn.style.display = off.length ? '' : 'none';
+  if (!off.length) return;
+  warn.innerHTML = `${off.length} trip${off.length === 1 ? ' uses' : 's use'} a mileage rate that isn't the IRS rate for ${off.length === 1 ? 'its' : 'their'} date
+    (2026: $0.725 to June 30, $0.76 from July 1).
+    <button class="btn btn-ghost btn-sm" style="margin-left:8px" onclick="applyIrsMileageRates()">Use the IRS rate for ${off.length === 1 ? 'it' : 'each'}</button>`;
+}
+function applyIrsMileageRates() {
+  const year = document.getElementById('acctYear').value;
+  const off = state.businessExpenses.filter(e => (e.date || '').startsWith(year) && mileageRateOff(e));
+  if (!off.length) return;
+  if (!confirm(`Change ${off.length} trip${off.length === 1 ? '' : 's'} to the IRS rate for ${off.length === 1 ? 'its' : 'their'} date? The dollar amount${off.length === 1 ? '' : 's'} will be recalculated.`)) return;
+  off.forEach(e => { e.mileRate = mileageRateFor(e.date); e.amount = mileageAmount(e.miles, e.mileRate); });
+  save(); odAutoSave();
+  renderAccounting();
+}
+
 // Warning while any of the year's Internet bills has no business-use %.
 function renderInternetRule(a) {
   const missing = a.expenses.filter(e => e.category === 'Internet' && internetPctOf(e) === null).length;
   const warn = document.getElementById('internetRuleWarning');
   warn.style.display = missing ? '' : 'none';
   warn.textContent = `${missing} Internet bill${missing === 1 ? ' has' : 's have'} no business-use % \u2014 counted at 100% until you Edit ${missing === 1 ? 'it' : 'them'} and add the %.`;
+}
+
+// Add form: the rate box takes the IRS rate for the date picked (it can
+// still be typed over). Says so when the year isn't in the table yet.
+function setBizExpRateFromDate() {
+  const date = document.getElementById('bizExpDate').value;
+  const irs = mileageRateFor(date);
+  if (irs !== null) document.getElementById('bizExpMileRate').value = irs;
+  const note = document.getElementById('bizExpRateNote');
+  note.textContent = !date ? '' : mileageRateKnown(date)
+    ? `IRS rate for ${fmtDate(date)}`
+    : `IRS rate for ${date.slice(0, 4)} isn't in the app yet \u2014 check irs.gov`;
 }
 
 // Add form: show the boxes the chosen category needs - Internet gets the
@@ -2647,7 +2720,7 @@ function updateBizExpFields() {
     if (last) fromInput.value = last.from;
   }
   const rateInput = document.getElementById('bizExpMileRate');
-  if (isMiles && rateInput.value === '') rateInput.value = MILEAGE_RATE_DEFAULT;
+  if (isMiles && rateInput.value === '') setBizExpRateFromDate();
   const typed = readPositive(document.getElementById('bizExpMiles'));
   const rate = readPositive(rateInput);
   const miles = typed === null ? null : round ? typed * 2 : typed;
