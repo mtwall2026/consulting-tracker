@@ -836,9 +836,13 @@
         <input id="bizExpFrom" placeholder="e.g. Home office or 123 Main St, City, ST 12345" style="width:220px" />
       </label>
       <label id="bizExpToField" style="display:none">To
-        <input id="bizExpTo" placeholder="e.g. 456 Oak Ave, City, ST 12345 &rarr; back" style="width:240px" />
+        <input id="bizExpTo" placeholder="e.g. 456 Oak Ave, City, ST 12345" style="width:240px" />
       </label>
-      <label id="bizExpMilesField" style="display:none">Miles
+      <!-- Round trip: enter the one-way miles once; they're doubled -->
+      <label id="bizExpRoundField" style="display:none;flex-direction:row;align-items:center;gap:6px;align-self:flex-end;padding-bottom:8px;cursor:pointer">
+        <input type="checkbox" id="bizExpRoundTrip" checked onchange="updateBizExpFields()" style="width:auto;padding:0" /> Round trip
+      </label>
+      <label id="bizExpMilesField" style="display:none"><span id="bizExpMilesLabel">One-way miles</span>
         <input type="number" id="bizExpMiles" placeholder="0" min="0" step="0.1" style="width:80px" oninput="updateBizExpFields()" />
       </label>
       <label id="bizExpRateField" style="display:none">Rate $/mile
@@ -860,7 +864,7 @@
       <button class="btn btn-primary" onclick="addBusinessExpense()" style="align-self:flex-end">+ Add Expense</button>
     </div>
     <p style="margin:10px 0 0;font-size:0.8rem;color:var(--muted)">Internet: enter the full bill as the amount and that month's business-use %; only that share counts as an expense.</p>
-    <p style="margin:4px 0 0;font-size:0.8rem;color:var(--muted)">Car &amp; Mileage: enter where you drove from and to, the total business miles, and the purpose; the miles count at the mileage rate. For several stops, list them in To separated by &rarr; (e.g. "Client A office &rarr; Client B office &rarr; back"); type "-&gt;" and it becomes &rarr;. Type an address any way (e.g. "123 main st houston tx 77002") and it's tidied into the standard form "123 Main St, Houston, TX 77002" when you leave the box; a name like "Home office" is left as you typed it. The rate covers gas and other running costs, so don't also enter gas for the same car. Parking and tolls can still go in on their own.</p>
+    <p style="margin:4px 0 0;font-size:0.8rem;color:var(--muted)">Car &amp; Mileage: enter where you drove from and to, the miles and the purpose; the miles count at the mileage rate. Leave <b>Round trip</b> ticked to go there and back: enter the one-way miles and they're doubled. For a one-way trip or a day with several stops, untick it and enter the total miles; list the stops in To separated by &rarr; (type "-&gt;" and it becomes &rarr;). Type an address any way (e.g. "123 main st houston tx 77002") and it's tidied into the standard form "123 Main St, Houston, TX 77002" when you leave the box; a name like "Home office" is left as you typed it. The rate covers gas and other running costs, so don't also enter gas for the same car. Parking and tolls can still go in on their own.</p>
     <div id="internetRuleWarning" style="display:none;background:#3a2e12;border:1px solid #b8860b;color:#fbbf24;border-radius:6px;padding:8px 12px;font-size:0.85rem;margin-top:8px"></div>
     <div id="acctExpenses" class="table-scroll" style="margin-top:14px"></div>
     <div class="export-row" style="margin-top:14px">
@@ -2048,8 +2052,9 @@ function attachAddressFormat(input) {
 }
 
 // "Home office -> Client A office" for a trip, or '' if neither end is set
+// ("<->" for a round trip)
 function tripRoute(e) {
-  return e.from || e.to ? `${e.from || '?'} \u2192 ${e.to || '?'}` : '';
+  return e.from || e.to ? `${e.from || '?'} ${e.roundTrip ? '\u2194' : '\u2192'} ${e.to || '?'}` : '';
 }
 // "120 mi" / "1,234.5 mi"
 function fmtMiles(n) { return `${n.toLocaleString('en-US', { maximumFractionDigits: 1 })} mi`; }
@@ -2170,7 +2175,7 @@ function renderAccounting() {
           <tr data-bizexpid="${e.id}">
             <td>${fmtDate(e.date)}</td>
             <td>${escHtml(e.category)}${e.category === 'Internet' ? ' ' + internetRowNote(e) : ''}${isMileage(e)
-              ? ' ' + muted(`(${fmtMiles(e.miles)} &times; $${e.mileRate.toFixed(3).replace(/0$/, '')}/mi)`) : ''}</td>
+              ? ' ' + muted(`(${fmtMiles(e.miles)}${e.roundTrip ? ' round trip' : ''} &times; $${e.mileRate.toFixed(3).replace(/0$/, '')}/mi)`) : ''}</td>
             <td>${tripRoute(e)
               ? `${escHtml(tripRoute(e))}${e.description ? `<br>${muted(escHtml(e.description))}` : ''}`
               : escHtml(e.description) || muted('&mdash;')}</td>
@@ -2225,7 +2230,10 @@ async function addBusinessExpense() {
   if (!date) { alert('Pick a date.'); return; }
   // Car & Mileage: the amount is miles x rate; everything else is typed in
   const mileage = category === MILEAGE_CATEGORY;
-  const miles = mileage ? readPositive(document.getElementById('bizExpMiles')) : null;
+  // Round trip: the miles typed are one way, so the trip is twice that
+  const roundTrip = mileage && document.getElementById('bizExpRoundTrip').checked;
+  const typedMiles = mileage ? readPositive(document.getElementById('bizExpMiles')) : null;
+  const miles = typedMiles === null ? null : roundTrip ? typedMiles * 2 : typedMiles;
   const mileRate = mileage ? readPositive(document.getElementById('bizExpMileRate')) : null;
   const from = mileage ? formatTripPlaces(document.getElementById('bizExpFrom').value) : '';
   const to = mileage ? formatTripPlaces(document.getElementById('bizExpTo').value) : '';
@@ -2245,7 +2253,7 @@ async function addBusinessExpense() {
   if (receiptFile && !odAccount) { alert('Please sign in to attach a receipt.'); return; }
   const expense = { id: uid(), date, category, amount, description };
   if (businessPct !== null) expense.businessPct = businessPct;
-  if (mileage) { expense.miles = miles; expense.mileRate = mileRate; expense.from = from; expense.to = to; }
+  if (mileage) { expense.miles = miles; expense.mileRate = mileRate; expense.from = from; expense.to = to; expense.roundTrip = roundTrip; }
   state.businessExpenses.unshift(expense);
   document.getElementById('bizExpAmount').value = '';
   document.getElementById('bizExpDescription').value = '';
@@ -2500,7 +2508,8 @@ function editBusinessExpense(id) {
         <input type="number" id="bed-pct" value="${internetPctOf(e) === null ? '' : internetPctOf(e)}" min="0" max="100" step="1" placeholder="%" title="Business-use % for this bill" style="${st};width:60px;margin-top:4px"> % business
       </span>
       <span id="bed-miles-wrap" style="display:${e.category === MILEAGE_CATEGORY ? '' : 'none'};white-space:nowrap">
-        <input type="number" id="bed-miles" value="${isMileage(e) ? e.miles : ''}" min="0" step="0.1" placeholder="miles" title="Business miles" oninput="updateBedFields()" style="${st};width:70px;margin-top:4px"> mi &times;
+        <label style="cursor:pointer;font-size:0.8rem" title="Miles are one way and doubled"><input type="checkbox" id="bed-round" ${e.roundTrip ? 'checked' : ''} onchange="toggleBedRoundTrip()"> Round trip</label><br>
+        <input type="number" id="bed-miles" value="${isMileage(e) ? (e.roundTrip ? e.miles / 2 : e.miles) : ''}" min="0" step="0.1" placeholder="miles" title="Business miles" oninput="updateBedFields()" style="${st};width:70px;margin-top:4px"> <span id="bed-miles-unit">${e.roundTrip ? 'mi each way' : 'mi'}</span> &times;
         $<input type="number" id="bed-rate" value="${isMileage(e) ? e.mileRate : MILEAGE_RATE_DEFAULT}" min="0" step="0.005" title="Rate in dollars per mile" oninput="updateBedFields()" style="${st};width:65px;margin-top:4px">/mi
       </span></td>
     <td><span id="bed-route-wrap" style="display:${e.category === MILEAGE_CATEGORY ? 'block' : 'none'};margin-bottom:4px;white-space:nowrap">
@@ -2529,10 +2538,21 @@ function updateBedFields() {
   const amountInput = document.getElementById('bed-amount');
   amountInput.disabled = isMiles;
   if (isMiles) {
-    const miles = readPositive(document.getElementById('bed-miles'));
+    const round = document.getElementById('bed-round').checked;
+    document.getElementById('bed-miles-unit').textContent = round ? 'mi each way' : 'mi';
+    const typed = readPositive(document.getElementById('bed-miles'));
+    const miles = typed === null ? null : round ? typed * 2 : typed;
     const rate = readPositive(document.getElementById('bed-rate'));
     amountInput.value = miles !== null && rate !== null ? mileageAmount(miles, rate) : '';
   }
+}
+// Edit row: ticking / unticking Round trip converts the miles box between
+// "each way" and "total", so the trip's total miles don't change by accident
+function toggleBedRoundTrip() {
+  const box = document.getElementById('bed-miles');
+  const typed = readPositive(box);
+  if (typed !== null) box.value = Math.round((document.getElementById('bed-round').checked ? typed / 2 : typed * 2) * 10) / 10;
+  updateBedFields();
 }
 function saveBusinessExpense(id) {
   const e = state.businessExpenses.find(x => x.id === id);
@@ -2541,7 +2561,9 @@ function saveBusinessExpense(id) {
   if (!date) { alert('Pick a date.'); return; }
   const category = document.getElementById('bed-category').value;
   const mileage = category === MILEAGE_CATEGORY;
-  const miles = mileage ? readPositive(document.getElementById('bed-miles')) : null;
+  const roundTrip = mileage && document.getElementById('bed-round').checked;
+  const typedMiles = mileage ? readPositive(document.getElementById('bed-miles')) : null;
+  const miles = typedMiles === null ? null : roundTrip ? typedMiles * 2 : typedMiles;
   const mileRate = mileage ? readPositive(document.getElementById('bed-rate')) : null;
   const from = mileage ? formatTripPlaces(document.getElementById('bed-from').value) : '';
   const to = mileage ? formatTripPlaces(document.getElementById('bed-to').value) : '';
@@ -2558,8 +2580,8 @@ function saveBusinessExpense(id) {
   e.amount = amount;
   // Only Internet bills carry a business-use %, only mileage miles + rate
   if (businessPct !== null) e.businessPct = businessPct; else delete e.businessPct;
-  if (mileage) { e.miles = miles; e.mileRate = mileRate; e.from = from; e.to = to; }
-  else { delete e.miles; delete e.mileRate; delete e.from; delete e.to; }
+  if (mileage) { e.miles = miles; e.mileRate = mileRate; e.from = from; e.to = to; e.roundTrip = roundTrip; }
+  else { delete e.miles; delete e.mileRate; delete e.from; delete e.to; delete e.roundTrip; }
   save(); odAutoSave();
   renderAccounting();
 }
@@ -2612,6 +2634,9 @@ function updateBizExpFields() {
   document.getElementById('bizExpRateField').style.display = isMiles ? '' : 'none';
   document.getElementById('bizExpFromField').style.display = isMiles ? '' : 'none';
   document.getElementById('bizExpToField').style.display = isMiles ? '' : 'none';
+  document.getElementById('bizExpRoundField').style.display = isMiles ? 'flex' : 'none';
+  const round = document.getElementById('bizExpRoundTrip').checked;
+  document.getElementById('bizExpMilesLabel').textContent = round ? 'One-way miles' : 'Total miles';
   // For a trip the description is its business purpose
   document.getElementById('bizExpDescLabel').textContent = isMiles ? 'Business purpose' : 'Description';
   document.getElementById('bizExpDescription').placeholder = isMiles ? 'e.g. Design review' : 'What it was for';
@@ -2623,10 +2648,12 @@ function updateBizExpFields() {
   }
   const rateInput = document.getElementById('bizExpMileRate');
   if (isMiles && rateInput.value === '') rateInput.value = MILEAGE_RATE_DEFAULT;
-  const miles = readPositive(document.getElementById('bizExpMiles'));
+  const typed = readPositive(document.getElementById('bizExpMiles'));
   const rate = readPositive(rateInput);
+  const miles = typed === null ? null : round ? typed * 2 : typed;
   document.getElementById('bizExpMilesNote').textContent =
-    isMiles && miles !== null && rate !== null ? `= ${fmtMoney(mileageAmount(miles, rate))}` : '';
+    isMiles && miles !== null && rate !== null
+      ? `= ${round ? fmtMiles(miles) + ' = ' : ''}${fmtMoney(mileageAmount(miles, rate))}` : '';
   const amount = parseFloat(document.getElementById('bizExpAmount').value);
   const pct = readPctInput(document.getElementById('bizExpBusinessPct'));
   document.getElementById('bizExpPctNote').textContent =
@@ -2654,11 +2681,11 @@ function downloadMileageLog() {
   const trips = a.expenses.filter(isMileage).reverse();
   if (!trips.length) { alert(`No Car & Mileage trips entered for ${a.year}.`); return; }
   const rows = [[`Cirrobound Solutions - Mileage Log ${a.year}`], [],
-    ['Date', 'From', 'To', 'Business purpose', 'Miles', 'Rate ($/mi)', 'Amount ($)']];
-  trips.forEach(e => rows.push([e.date, e.from || '', e.to || '', e.description || '', e.miles, e.mileRate, e.amount.toFixed(2)]));
+    ['Date', 'From', 'To', 'Round trip', 'Business purpose', 'Miles', 'Rate ($/mi)', 'Amount ($)']];
+  trips.forEach(e => rows.push([e.date, e.from || '', e.to || '', e.roundTrip ? 'Yes' : '', e.description || '', e.miles, e.mileRate, e.amount.toFixed(2)]));
   const totalMiles = Math.round(trips.reduce((n, e) => n + e.miles, 0) * 10) / 10;
   const totalAmount = trips.reduce((n, e) => n + e.amount, 0);
-  rows.push([], ['', '', '', `Total (${trips.length} trip${trips.length === 1 ? '' : 's'})`, totalMiles, '', totalAmount.toFixed(2)]);
+  rows.push([], ['', '', '', '', `Total (${trips.length} trip${trips.length === 1 ? '' : 's'})`, totalMiles, '', totalAmount.toFixed(2)]);
   const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
   // The leading byte-order mark tells Excel the file is UTF-8, so arrows
   // and accented names in From/To show correctly
@@ -2672,9 +2699,9 @@ function exportAccountingCSV() {
     ['1. REVENUE - DEPOSITS'], ['Date Received', 'Invoice #', 'From', 'Amount ($)']];
   a.deposits.forEach(r => rows.push([invoicePaidDateStr(r), r.invoiceNum, r.clientName, invoiceRecordTotal(r).toFixed(2)]));
   rows.push(['', '', 'Total deposits', a.revenue.toFixed(2)], [],
-    ['2. BUSINESS EXPENSES'], ['Date', 'Category', 'Description', 'Amount ($)', 'Deductible ($)', 'Receipt', 'Miles', 'Rate ($/mi)', 'From', 'To']);
+    ['2. BUSINESS EXPENSES'], ['Date', 'Category', 'Description', 'Amount ($)', 'Deductible ($)', 'Receipt', 'Miles', 'Rate ($/mi)', 'From', 'To', 'Round trip']);
   [...a.expenses].reverse().forEach(e => rows.push([e.date, e.category, e.description || '', e.amount.toFixed(2), (e.amount * deductiblePct(e)).toFixed(2), e.receipt ? e.receipt.fileName : '',
-    isMileage(e) ? e.miles : '', isMileage(e) ? e.mileRate : '', e.from || '', e.to || '']));
+    isMileage(e) ? e.miles : '', isMileage(e) ? e.mileRate : '', e.from || '', e.to || '', e.roundTrip ? 'Yes' : '']));
   rows.push(['', '', 'Total', a.spent.toFixed(2), a.deductible.toFixed(2)], [],
     ['3. AGI'],
     ['Net profit', a.netProfit.toFixed(2)],
