@@ -879,7 +879,10 @@
   <div class="card">
     <h2>3 &middot; Adjusted Gross Income</h2>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
-      <label style="display:flex;flex-direction:column;gap:4px;font-size:0.8rem;color:var(--muted)">Other income this year (W-2, interest&hellip;) &mdash; optional
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:0.8rem;color:var(--muted)">W-2 wages this year (yours and your spouse's) &mdash; optional
+        <input type="number" id="acctWages" min="0" step="0.01" placeholder="0.00" onchange="saveAccountingYearInputs()" style="width:200px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px" />
+      </label>
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:0.8rem;color:var(--muted)">Other income (interest, dividends&hellip;) &mdash; optional
         <input type="number" id="acctOtherIncome" min="0" step="0.01" placeholder="0.00" onchange="saveAccountingYearInputs()" style="width:200px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px" />
       </label>
       <label style="display:flex;flex-direction:column;gap:4px;font-size:0.8rem;color:var(--muted)">Other adjustments (SEP-IRA, SE health insurance&hellip;) &mdash; optional
@@ -899,6 +902,18 @@
           <option value="mfj">Married filing jointly</option>
           <option value="hoh">Head of household</option>
         </select>
+      </label>
+      <!-- Children: all count for the Earned Income Credit and the SC
+           dependent exemption; under 17 for the Child Tax Credit; under 6
+           for SC's extra young-child deduction -->
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:0.8rem;color:var(--muted)">Children you claim
+        <input type="number" id="acctKids" min="0" step="1" placeholder="0" onchange="saveAccountingYearInputs()" style="width:90px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px" />
+      </label>
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:0.8rem;color:var(--muted)">&hellip;of them under 17
+        <input type="number" id="acctKidsUnder17" min="0" step="1" placeholder="0" onchange="saveAccountingYearInputs()" style="width:90px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px" />
+      </label>
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:0.8rem;color:var(--muted)">&hellip;of them under 6
+        <input type="number" id="acctKidsUnder6" min="0" step="1" placeholder="0" onchange="saveAccountingYearInputs()" style="width:90px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px" />
       </label>
     </div>
     <div id="acctTaxes"></div>
@@ -2146,7 +2161,27 @@ const TAX_RULES = {
       mfj:    [[24800, .10], [100800, .12], [211400, .22], [403550, .24], [512450, .32], [768700, .35], [Infinity, .37]]
     },
     qbiThreshold: { single: 201750, hoh: 201750, mfj: 403500 },
+    // Child Tax Credit per child under 17; up to `refundable` of it can be
+    // paid out (15% of earned income over $2,500). Phases out $50 per
+    // $1,000 of AGI over the start.
+    ctc: { perChild: 2200, refundable: 1700, earnedFloor: 2500, refundRate: 0.15,
+           phaseoutStart: { single: 200000, hoh: 200000, mfj: 400000 } },
+    // Earned Income Credit by number of qualifying children (3 = 3 or more):
+    // rate x earned income up to max, less phaseRate x income over the start
+    eitc: {
+      0: { rate: 0.0765, max: 664,  phaseRate: 0.0765, start: { mfj: 18140, other: 10860 } },
+      1: { rate: 0.34,   max: 4427, phaseRate: 0.1598, start: { mfj: 31160, other: 23890 } },
+      2: { rate: 0.40,   max: 7316, phaseRate: 0.2106, start: { mfj: 31160, other: 23890 } },
+      3: { rate: 0.45,   max: 8231, phaseRate: 0.2106, start: { mfj: 31160, other: 23890 } }
+    },
     sc: {
+      // Dependent exemption per dependent (Section 12-6-1140(13)), plus the
+      // same again for each dependent under 6 (12-6-1160). SCDOR hasn't
+      // published the 2026 inflation-adjusted amount yet - this is 2025's.
+      dependentExemption: 4930, dependentExemptionNote: "2025 amount; SCDOR hasn't published 2026's yet",
+      // SC Earned Income Credit: 125% of the federal one, at most $200, and
+      // only against SC tax (nonrefundable)
+      eitcRate: 1.25, eitcMax: 200,
       // SCIAD: full amount up to `start` AGI, then reduced by
       // amount x (AGI - start) / range (reduction rounded down to $10)
       sciad: { single: { amount: 15000, start: 40000, range: 55000 },
@@ -2206,11 +2241,45 @@ function buildIncomeTaxes(a, status) {
   let reduction = a.agi <= sd.start ? 0 : sd.amount * (a.agi - sd.start) / sd.range;
   reduction = Math.floor(reduction / 10) * 10;
   const sciad = Math.max(0, sd.amount - reduction);
-  const scTaxable = Math.max(0, a.agi - sciad);
+  // SC dependent exemption: every child, plus the same again for each under 6
+  const scDependents = rules.sc.dependentExemption * (a.kids + a.kidsUnder6);
+  const scTaxable = Math.max(0, a.agi - sciad - scDependents);
   const scIncomeTax = Math.max(0, rules.sc.tax(scTaxable));
-  const total = a.seTax + fedIncomeTax + addlMedicare + scIncomeTax;
+
+  // Earned income: business profit less half the SE tax, plus W-2 wages
+  const earned = Math.max(0, a.netProfit - a.seTaxHalf) + a.wages;
+  // Earned Income Credit (refundable). Figured on earned income; if AGI is
+  // past the phase-out start it's also figured on AGI and the smaller wins.
+  const ec = rules.eitc[Math.min(a.kids, 3)];
+  const ecStart = ec.start[status === 'mfj' ? 'mfj' : 'other'];
+  const ecOf = x => Math.max(0, Math.min(ec.rate * x, ec.max) - ec.phaseRate * Math.max(0, x - ecStart));
+  let eitc = earned > 0 ? ecOf(earned) : 0;
+  if (a.agi >= ecStart) eitc = Math.min(eitc, ecOf(a.agi));
+  // Child Tax Credit: first against income tax, the rest refundable up to
+  // $1,700 a child as the "additional child tax credit"
+  const c = rules.ctc;
+  const ctcFull = Math.max(0, c.perChild * a.kidsUnder17
+    - 50 * Math.ceil(Math.max(0, a.agi - c.phaseoutStart[status]) / 1000));
+  const ctcUsed = Math.min(ctcFull, fedIncomeTax);
+  let actc = 0;
+  if (ctcFull > ctcUsed) {
+    let refundBase = c.refundRate * Math.max(0, earned - c.earnedFloor);
+    // With 3+ children it's the larger of that and Social Security/Medicare
+    // taxes paid (half the SE tax + the employee share on wages) less the EIC
+    if (a.kidsUnder17 >= 3) refundBase = Math.max(refundBase, a.seTaxHalf + a.wages * 0.0765 - eitc);
+    actc = Math.min(ctcFull - ctcUsed, c.refundable * a.kidsUnder17, refundBase);
+  }
+  const fedAfterCtc = fedIncomeTax - ctcUsed;
+  // SC Earned Income Credit: 125% of the federal one, max $200, only up to SC tax
+  const scEitc = Math.min(scIncomeTax, rules.sc.eitcMax, rules.sc.eitcRate * eitc);
+  const scAfterCredits = scIncomeTax - scEitc;
+
+  const beforeCredits = a.seTax + fedIncomeTax + addlMedicare + scIncomeTax;
+  // Refundable credits (ACTC, EIC) can take the total below zero = a refund
+  const total = a.seTax + fedAfterCtc + addlMedicare + scAfterCredits - actc - eitc;
   return { status, std, beforeQbi, qbi, qbiDeduction, overQbiThreshold, fedTaxable, fedIncomeTax,
-           addlMedicare, sciad, scTaxable, scIncomeTax, total };
+           addlMedicare, sciad, scDependents, scTaxable, scIncomeTax, earned, eitc, ctcFull, ctcUsed,
+           actc, fedAfterCtc, scEitc, scAfterCredits, beforeCredits, total };
 }
 
 // Every number for one year - used by the page and the CSV export.
@@ -2247,14 +2316,20 @@ function buildAccounting(year) {
   // (Schedule C line 31); other income is added; half the SE tax and any
   // other adjustments are then subtracted (Schedule 1, Part II).
   const inputs = (state.accountingYears || {})[year] || {};
+  const wages = inputs.wages || 0;
   const otherIncome = inputs.otherIncome || 0;
   const otherAdjustments = inputs.otherAdjustments || 0;
-  const totalIncome = netProfit + otherIncome;
+  const totalIncome = netProfit + wages + otherIncome;
+  // Children claimed (all ages), and how many are under 17 / under 6
+  const kids = Math.max(0, Math.floor(inputs.kids || 0));
+  const kidsUnder17 = Math.min(kids, Math.max(0, Math.floor(inputs.kidsUnder17 || 0)));
+  const kidsUnder6 = Math.min(kidsUnder17, Math.max(0, Math.floor(inputs.kidsUnder6 || 0)));
   const agi = totalIncome - seTaxHalf - otherAdjustments;
   const filingStatus = FILING_STATUS_NAMES[inputs.filingStatus] ? inputs.filingStatus : 'single';
 
   const a = { year, deposits, revenue, unpaid, unpaidTotal, expenses, categories, spent, deductible,
-              netProfit, seTax, seTaxHalf, otherIncome, totalIncome, otherAdjustments, agi, filingStatus };
+              netProfit, seTax, seTaxHalf, wages, otherIncome, totalIncome, otherAdjustments, agi, filingStatus,
+              kids, kidsUnder17, kidsUnder6 };
   a.taxes = buildIncomeTaxes(a, filingStatus);
   return a;
 }
@@ -2291,7 +2366,9 @@ function renderAccounting() {
     <div class="summary-card"><div class="label">Net Profit (Business Income)</div><div class="value">${fmtMoney(a.netProfit)}</div></div>
     <div class="summary-card"><div class="label">Est. AGI</div><div class="value">${fmtMoney(a.agi)}</div></div>
     <div class="summary-card"><div class="label">Est. Self-Employment Tax</div><div class="value">${fmtMoney(a.seTax)}</div></div>
-    ${a.taxes ? `<div class="summary-card"><div class="label">Est. Total Tax</div><div class="value">${fmtMoney(a.taxes.total)}</div></div>` : ''}`;
+    ${a.taxes ? (a.taxes.total >= 0
+      ? `<div class="summary-card"><div class="label">Est. Total Tax</div><div class="value">${fmtMoney(a.taxes.total)}</div></div>`
+      : `<div class="summary-card"><div class="label">Est. Refund</div><div class="value">${fmtMoney(-a.taxes.total)}</div></div>`) : ''}`;
 
   // 1. Deposits
   document.getElementById('acctDeposits').innerHTML = (a.deposits.length ? `
@@ -2336,6 +2413,7 @@ function renderAccounting() {
 
   // 3. AGI
   const inputs = (state.accountingYears || {})[a.year] || {};
+  document.getElementById('acctWages').value = inputs.wages || '';
   document.getElementById('acctOtherIncome').value = inputs.otherIncome || '';
   document.getElementById('acctOtherAdjustments').value = inputs.otherAdjustments || '';
   const expenseLines = a.categories.length
@@ -2354,6 +2432,7 @@ function renderAccounting() {
         ${expenseLines}
         ${line('Total deductible expenses', '&minus;' + fmtMoney(a.deductible), { subtotal: true })}
         ${line('Net profit ' + muted('&mdash; your business income (Schedule C, line 31)'), fmtMoney(a.netProfit), { total: true })}
+        ${a.wages ? line('W-2 wages', '+' + fmtMoney(a.wages), { indent: true }) : ''}
         ${a.otherIncome ? line('Other income', '+' + fmtMoney(a.otherIncome), { indent: true }) : ''}
         ${line('Adjustments to income', '', { heading: true })}
         ${line('Deductible half of self-employment tax', '&minus;' + fmtMoney(a.seTaxHalf), { indent: true })}
@@ -2372,6 +2451,10 @@ function renderAccounting() {
 function renderTaxes(a, line, muted) {
   const status = document.getElementById('acctFilingStatus');
   if (document.activeElement !== status) status.value = a.filingStatus;
+  [['acctKids', a.kids], ['acctKidsUnder17', a.kidsUnder17], ['acctKidsUnder6', a.kidsUnder6]].forEach(([id, n]) => {
+    const el = document.getElementById(id);
+    if (document.activeElement !== el) el.value = n || '';
+  });
   const box = document.getElementById('acctTaxes');
   const t = a.taxes;
   const seLine = line('Self-employment tax ' + muted(`12.4% Social Security (up to the wage base) + 2.9% Medicare, on 92.35% of net profit &mdash; Schedule SE`), fmtMoney(a.seTax));
@@ -2395,21 +2478,34 @@ function renderTaxes(a, line, muted) {
             : `20% of ${fmtMoney(t.qbi)} business income after half the SE tax`), '&minus;' + fmtMoney(t.qbiDeduction), { indent: true })}
         ${line('Federal taxable income', fmtMoney(t.fedTaxable), { indent: true, subtotal: true })}
         ${line('Federal income tax ' + muted(`${a.year} brackets`), fmtMoney(t.fedIncomeTax), { indent: true })}
+        ${t.ctcFull ? line('Child tax credit ' + muted(`${a.kidsUnder17} &times; $2,200, used against the income tax`), '&minus;' + fmtMoney(t.ctcUsed), { indent: true }) : ''}
+        ${t.ctcFull ? line('Federal income tax after the credit', fmtMoney(t.fedAfterCtc), { indent: true, subtotal: true }) : ''}
         ${t.addlMedicare ? line('Additional Medicare tax ' + muted('0.9% above the threshold (Form 8959)'), fmtMoney(t.addlMedicare), { indent: true }) : ''}
+
+        ${t.actc || t.eitc ? line('Refundable federal credits ' + muted('(paid to you even beyond the tax you owe)'), '', { heading: true }) : ''}
+        ${t.actc ? line('Additional child tax credit ' + muted(`rest of the child credit, up to $1,700 a child`), '&minus;' + fmtMoney(t.actc), { indent: true }) : ''}
+        ${t.eitc ? line('Earned income credit ' + muted(`${Math.min(a.kids, 3)}${a.kids >= 3 ? '+' : ''} children, earned income ${fmtMoney(t.earned)}`), '&minus;' + fmtMoney(t.eitc), { indent: true }) : ''}
 
         ${line('South Carolina income tax', '', { heading: true })}
         ${line('Federal AGI ' + muted('(South Carolina starts here)'), fmtMoney(a.agi), { indent: true })}
         ${line('SC Income Adjusted Deduction (SCIAD) ' + muted(`(${FILING_STATUS_NAMES[t.status]}${t.sciad === 0 ? ', fully phased out' : ''})`), '&minus;' + fmtMoney(t.sciad), { indent: true })}
+        ${t.scDependents ? line('SC dependent exemptions ' + muted(`${a.kids} &times; $${(TAX_RULES[a.year].sc.dependentExemption).toLocaleString()}${a.kidsUnder6 ? ` + ${a.kidsUnder6} under 6` : ''} (${TAX_RULES[a.year].sc.dependentExemptionNote})`), '&minus;' + fmtMoney(t.scDependents), { indent: true }) : ''}
         ${line('SC taxable income', fmtMoney(t.scTaxable), { indent: true, subtotal: true })}
         ${line('SC income tax ' + muted(t.scTaxable < 30000 ? '1.99%' : '5.21% minus $966'), fmtMoney(t.scIncomeTax), { indent: true })}
+        ${t.scEitc ? line('SC earned income credit ' + muted('125% of the federal one, at most $200'), '&minus;' + fmtMoney(t.scEitc), { indent: true }) : ''}
 
-        ${line('Total estimated tax' + muted(pct), fmtMoney(t.total), { total: true })}
+        ${line('Taxes before credits', fmtMoney(t.beforeCredits), { subtotal: true })}
+        ${t.total >= 0
+          ? line('Total estimated tax' + muted(pct), fmtMoney(t.total), { total: true })
+          : line('Estimated refund ' + muted('&mdash; your credits are more than your taxes'), fmtMoney(-t.total), { total: true })}
       </tbody>
     </table>
     <p style="color:var(--muted);font-size:0.8rem;margin:12px 0 0">
-      Uses the standard deduction (no itemizing) and leaves out tax credits, other deductions (e.g. the senior, tips or overtime deductions)
-      and anything already paid or withheld. With "Married filing jointly", put your spouse's income in Other income above.
-      South Carolina additions and subtractions other than the SCIAD aren't included. Estimates only &mdash; confirm with your accountant.
+      Uses the standard deduction (no itemizing). Credits included: child tax credit, earned income credit and SC's earned income credit;
+      others (e.g. child care, education) and other deductions (senior, tips, overtime) aren't, nor anything already paid or withheld.
+      With "Married filing jointly", include your spouse's wages above. Children are assumed to qualify (your dependents with Social Security
+      numbers; for the earned income credit, under 19 or a full-time student under 24, and investment income under $12,200).
+      Estimates only &mdash; confirm with your accountant.
     </p>`;
 }
 
@@ -2899,10 +2995,18 @@ function saveAccountingYearInputs() {
   if (!state.accountingYears) state.accountingYears = {};
   state.accountingYears[year] = {
     ...(state.accountingYears[year] || {}),   // keep the year's internet %
+    wages: parseFloat(document.getElementById('acctWages').value) || 0,
     otherIncome: parseFloat(document.getElementById('acctOtherIncome').value) || 0,
     otherAdjustments: parseFloat(document.getElementById('acctOtherAdjustments').value) || 0,
-    filingStatus: document.getElementById('acctFilingStatus').value
+    filingStatus: document.getElementById('acctFilingStatus').value,
+    // Children: under-17 can't exceed all, under-6 can't exceed under-17
+    kids: Math.max(0, parseInt(document.getElementById('acctKids').value, 10) || 0),
+    kidsUnder17: Math.max(0, parseInt(document.getElementById('acctKidsUnder17').value, 10) || 0),
+    kidsUnder6: Math.max(0, parseInt(document.getElementById('acctKidsUnder6').value, 10) || 0)
   };
+  const y = state.accountingYears[year];
+  y.kidsUnder17 = Math.min(y.kidsUnder17, y.kids);
+  y.kidsUnder6 = Math.min(y.kidsUnder6, y.kidsUnder17);
   save(); odAutoSave();
   renderAccounting();
 }
@@ -2941,23 +3045,30 @@ function exportAccountingCSV() {
     ['Deposits (revenue)', a.revenue.toFixed(2)],
     ['Total deductible expenses', a.deductible.toFixed(2)],
     ['Net profit - business income (Schedule C line 31)', a.netProfit.toFixed(2)],
+    ['W-2 wages', a.wages.toFixed(2)],
     ['Other income', a.otherIncome.toFixed(2)],
     ['Deductible half of self-employment tax', a.seTaxHalf.toFixed(2)],
     ['Other adjustments', a.otherAdjustments.toFixed(2)],
     ['Adjusted Gross Income (est.)', a.agi.toFixed(2)],
     [],
-    ['4. ESTIMATED TAXES' + (a.taxes ? ' (' + FILING_STATUS_NAMES[a.taxes.status] + ')' : '')],
+    ['4. ESTIMATED TAXES' + (a.taxes ? ' (' + FILING_STATUS_NAMES[a.taxes.status] + ', ' + a.kids + ' children)' : '')],
     ['Self-employment tax', a.seTax.toFixed(2)],
     ...(a.taxes ? [
       ['Standard deduction', a.taxes.std.toFixed(2)],
       ['Qualified business income deduction', a.taxes.qbiDeduction.toFixed(2)],
       ['Federal taxable income', a.taxes.fedTaxable.toFixed(2)],
       ['Federal income tax', a.taxes.fedIncomeTax.toFixed(2)],
+      ['Child tax credit used', a.taxes.ctcUsed.toFixed(2)],
       ['Additional Medicare tax', a.taxes.addlMedicare.toFixed(2)],
+      ['Additional child tax credit (refundable)', a.taxes.actc.toFixed(2)],
+      ['Earned income credit (refundable)', a.taxes.eitc.toFixed(2)],
       ['SC Income Adjusted Deduction (SCIAD)', a.taxes.sciad.toFixed(2)],
+      ['SC dependent exemptions', a.taxes.scDependents.toFixed(2)],
       ['SC taxable income', a.taxes.scTaxable.toFixed(2)],
       ['SC income tax', a.taxes.scIncomeTax.toFixed(2)],
-      ['Total estimated tax', a.taxes.total.toFixed(2)]
+      ['SC earned income credit', a.taxes.scEitc.toFixed(2)],
+      ['Taxes before credits', a.taxes.beforeCredits.toFixed(2)],
+      [a.taxes.total >= 0 ? 'Total estimated tax' : 'Estimated refund', Math.abs(a.taxes.total).toFixed(2)]
     ] : [['Federal / SC income tax', 'rules for ' + a.year + ' not in the app']]));
   const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
   const link = document.createElement('a');
