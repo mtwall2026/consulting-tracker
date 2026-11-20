@@ -825,6 +825,9 @@
       <label>Description
         <input id="bizExpDescription" placeholder="What it was for" style="width:200px" />
       </label>
+      <label>Receipt <span style="font-size:0.75rem;color:var(--muted)">(optional)</span>
+        <input type="file" id="bizExpReceipt" accept="image/*,application/pdf" style="font-size:0.8rem;max-width:210px" />
+      </label>
       <button class="btn btn-primary" onclick="addBusinessExpense()" style="align-self:flex-end">+ Add Expense</button>
     </div>
     <div id="acctExpenses" style="margin-top:14px"></div>
@@ -1913,7 +1916,7 @@ function renderAccounting() {
   // 2. Expenses list
   document.getElementById('acctExpenses').innerHTML = a.expenses.length ? `
     <table>
-      <thead><tr><th>Date</th><th>Category</th><th>Description</th><th style="text-align:right">Amount</th><th></th></tr></thead>
+      <thead><tr><th>Date</th><th>Category</th><th>Description</th><th style="text-align:right">Amount</th><th>Receipt</th><th></th></tr></thead>
       <tbody>
         ${a.expenses.map(e => `
           <tr data-bizexpid="${e.id}">
@@ -1921,6 +1924,7 @@ function renderAccounting() {
             <td>${escHtml(e.category)}</td>
             <td>${escHtml(e.description) || muted('&mdash;')}</td>
             <td class="amount" style="text-align:right">${fmtMoney(e.amount)}</td>
+            <td data-receipt-cell>${receiptCellHtml(e)}</td>
             <td style="display:flex;gap:4px">
               <button class="del-row" onclick="editBusinessExpense('${e.id}')" title="Edit" style="color:var(--accent)">&#9998;</button>
               <button class="del-row" onclick="deleteBusinessExpense('${e.id}')" title="Delete">&times;</button>
@@ -1959,24 +1963,90 @@ function renderAccounting() {
     </p>`;
 }
 
-function addBusinessExpense() {
+async function addBusinessExpense() {
   const date = document.getElementById('bizExpDate').value;
   const category = document.getElementById('bizExpCategory').value;
   const amount = parseFloat(document.getElementById('bizExpAmount').value);
   const description = document.getElementById('bizExpDescription').value.trim();
+  const receiptInput = document.getElementById('bizExpReceipt');
+  const receiptFile = receiptInput.files[0];
   if (!date) { alert('Pick a date.'); return; }
   if (!amount || amount <= 0) { alert('Enter a valid amount.'); return; }
-  state.businessExpenses.unshift({ id: uid(), date, category, amount, description });
+  // Receipts upload to OneDrive, which needs a sign-in - check before
+  // saving anything so an expense is never half-added.
+  if (receiptFile && !odAccount) { alert('Please sign in to attach a receipt.'); return; }
+  const expense = { id: uid(), date, category, amount, description };
+  state.businessExpenses.unshift(expense);
   document.getElementById('bizExpAmount').value = '';
   document.getElementById('bizExpDescription').value = '';
+  receiptInput.value = '';
   // Jump the page to the year just entered so the new expense is visible
   document.getElementById('acctYear').value = date.slice(0, 4);
   save(); odAutoSave();
   renderAccounting();
+  // The expense is already saved; a failed upload only leaves it without a
+  // receipt, which can be attached from its row afterwards.
+  if (receiptFile) await attachReceipt(expense.id, receiptFile);
+}
+
+// -- Receipts -------------------------------------------------------
+// Same pattern as invoice payment documents and project POs: the file is
+// uploaded on its own into a Receipts folder in the signed-in account's
+// OneDrive, and the expense keeps only a small reference to it
+// ({fileName, driveItemId, webUrl}), never the file itself.
+
+// Receipt cell for one expense row: View link + Replace, or Attach.
+function receiptCellHtml(e) {
+  const picker = label => `
+    <label class="btn btn-ghost btn-sm" style="cursor:pointer" title="${e.receipt ? 'Replace the receipt' : 'Attach a receipt (photo or PDF)'}">${label}
+      <input type="file" accept="image/*,application/pdf" style="display:none" onchange="attachReceipt('${e.id}', this.files[0])" />
+    </label>`;
+  if (!e.receipt) return picker('Attach');
+  return `<div style="display:flex;gap:4px;align-items:center">
+      <a href="${escHtml(e.receipt.webUrl)}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm"
+         title="${escHtml(e.receipt.fileName)}" style="color:var(--accent2);text-decoration:none">&#128206; View</a>
+      ${picker('Replace')}
+    </div>`;
+}
+
+// Uploads the file and returns its reference. The OneDrive name starts with
+// the expense's date and id so two receipts called "receipt.pdf" never
+// overwrite each other; the original name is kept for display.
+async function uploadReceiptFile(expense, file) {
+  const safeName = file.name.replace(/[^A-Za-z0-9._-]/g, '_');
+  const fileName = `${expense.date}-${expense.id}-${safeName}`;
+  const token = await getOdToken();
+  const res = await fetch(
+    'https://graph.microsoft.com/v1.0/me/drive/root:/Apps/Consulting Tracker/Receipts/' + fileName + ':/content',
+    { method: 'PUT', headers: { Authorization: 'Bearer ' + token, 'Content-Type': file.type || 'application/octet-stream' }, body: file }
+  );
+  if (!res.ok) throw new Error(await res.text());
+  const item = await res.json();
+  return { fileName: file.name, driveItemId: item.id, webUrl: item.webUrl };
+}
+
+// Attach (or replace) the receipt on one expense.
+async function attachReceipt(id, file) {
+  if (!file) return;
+  if (!odAccount) { alert('Please sign in to attach a receipt.'); return; }
+  const e = state.businessExpenses.find(x => x.id === id);
+  if (!e) return;
+  const cell = document.querySelector(`tr[data-bizexpid="${id}"] [data-receipt-cell]`);
+  if (cell) cell.innerHTML = '<span style="color:var(--muted);font-size:0.85rem">Uploading&hellip;</span>';
+  try {
+    e.receipt = await uploadReceiptFile(e, file);
+    save(); odAutoSave();
+  } catch (err) {
+    alert('Receipt upload failed: ' + err.message + '\n\nThe expense is saved; try attaching the receipt again from its row (a PDF or a smaller photo may help).');
+  }
+  renderAccounting();
 }
 
 function deleteBusinessExpense(id) {
-  if (!confirm('Delete this expense?')) return;
+  const e = state.businessExpenses.find(x => x.id === id);
+  if (!confirm(e && e.receipt
+    ? 'Delete this expense? Its receipt file stays in your OneDrive Receipts folder.'
+    : 'Delete this expense?')) return;
   state.businessExpenses = state.businessExpenses.filter(e => e.id !== id);
   save(); odAutoSave();
   renderAccounting();
@@ -1993,6 +2063,7 @@ function editBusinessExpense(id) {
     <td><select id="bed-category" style="${st}">${businessCategoryOptionsHtml(e.category)}</select></td>
     <td><input type="text" id="bed-desc" value="${escHtml(e.description)}" style="${st};width:180px"></td>
     <td><input type="number" id="bed-amount" value="${e.amount}" min="0" step="0.01" style="${st};width:100px"></td>
+    <td data-receipt-cell>${receiptCellHtml(e)}</td>
     <td style="display:flex;gap:6px">
       <button class="btn btn-primary btn-sm" onclick="saveBusinessExpense('${id}')">Save</button>
       <button class="btn btn-ghost btn-sm" onclick="renderAccounting()">Cancel</button>
@@ -2051,8 +2122,8 @@ function exportAccountingCSV() {
     ['1. REVENUE - DEPOSITS'], ['Date Received', 'Invoice #', 'From', 'Amount ($)']];
   a.deposits.forEach(r => rows.push([invoicePaidDateStr(r), r.invoiceNum, r.clientName, invoiceRecordTotal(r).toFixed(2)]));
   rows.push(['', '', 'Total deposits', a.revenue.toFixed(2)], [],
-    ['2. BUSINESS EXPENSES'], ['Date', 'Category', 'Description', 'Amount ($)', 'Deductible ($)']);
-  [...a.expenses].reverse().forEach(e => rows.push([e.date, e.category, e.description || '', e.amount.toFixed(2), (e.amount * deductiblePct(e.category)).toFixed(2)]));
+    ['2. BUSINESS EXPENSES'], ['Date', 'Category', 'Description', 'Amount ($)', 'Deductible ($)', 'Receipt']);
+  [...a.expenses].reverse().forEach(e => rows.push([e.date, e.category, e.description || '', e.amount.toFixed(2), (e.amount * deductiblePct(e.category)).toFixed(2), e.receipt ? e.receipt.fileName : '']));
   rows.push(['', '', 'Total', a.spent.toFixed(2), a.deductible.toFixed(2)], [],
     ['3. AGI'],
     ['Net profit', a.netProfit.toFixed(2)],
