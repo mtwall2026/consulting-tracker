@@ -889,6 +889,21 @@
     <div id="acctAgi"></div>
   </div>
 
+  <!-- 4. Estimated taxes: SE tax + federal and South Carolina income tax -->
+  <div class="card">
+    <h2>4 &middot; Estimated Taxes</h2>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:0.8rem;color:var(--muted)">Filing status
+        <select id="acctFilingStatus" onchange="saveAccountingYearInputs()" style="width:220px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px">
+          <option value="single">Single</option>
+          <option value="mfj">Married filing jointly</option>
+          <option value="hoh">Head of household</option>
+        </select>
+      </label>
+    </div>
+    <div id="acctTaxes"></div>
+  </div>
+
   <!-- Business Info: the address/phone printed in every invoice header.
        Kept in your synced data (behind sign-in), never in this public code. -->
   <div class="card">
@@ -2110,6 +2125,94 @@ function invoicePaidDateStr(r) {
   return r.paid && r.paidAt ? localDateStr(new Date(r.paidAt)) : '';
 }
 
+// -- Tax rules by year ---------------------------------------------------
+// Add a year's entry when its numbers are published. Sources for 2026:
+//   Federal: IRS Rev. Proc. 2025-32 (brackets, standard deduction, QBI
+//            threshold) and the OBBBA $400 minimum QBI deduction.
+//   Social Security wage base: SSA, $184,500 for 2026.
+//   South Carolina: Act No. 110 (H. 4216) per SCDOR Information Letter
+//            26-23 - taxable income starts from federal AGI, minus the SC
+//            Income Adjusted Deduction (SCIAD); 1.99% under $30,000, else
+//            5.21% of taxable income minus $966.
+// Brackets: [top of bracket, rate]; the last bracket has no top (Infinity).
+const TAX_RULES = {
+  '2026': {
+    ssWageBase: 184500,
+    addlMedicare: { single: 200000, hoh: 200000, mfj: 250000 },      // 0.9% above these
+    standardDeduction: { single: 16100, hoh: 24150, mfj: 32200 },
+    brackets: {
+      single: [[12400, .10], [50400, .12], [105700, .22], [201775, .24], [256225, .32], [640600, .35], [Infinity, .37]],
+      hoh:    [[17700, .10], [67450, .12], [105700, .22], [201750, .24], [256200, .32], [640600, .35], [Infinity, .37]],
+      mfj:    [[24800, .10], [100800, .12], [211400, .22], [403550, .24], [512450, .32], [768700, .35], [Infinity, .37]]
+    },
+    qbiThreshold: { single: 201750, hoh: 201750, mfj: 403500 },
+    sc: {
+      // SCIAD: full amount up to `start` AGI, then reduced by
+      // amount x (AGI - start) / range (reduction rounded down to $10)
+      sciad: { single: { amount: 15000, start: 40000, range: 55000 },
+               hoh:    { amount: 22500, start: 60000, range: 82500 },
+               mfj:    { amount: 30000, start: 80000, range: 110000 } },
+      tax: ti => ti < 30000 ? ti * 0.0199 : ti * 0.0521 - 966
+    }
+  }
+};
+const FILING_STATUS_NAMES = { single: 'Single', mfj: 'Married filing jointly', hoh: 'Head of household' };
+
+// Tax on taxable income from a bracket table
+function bracketTax(ti, brackets) {
+  let tax = 0, low = 0;
+  for (const [top, rate] of brackets) {
+    if (ti <= low) break;
+    tax += (Math.min(ti, top) - low) * rate;
+    low = top;
+  }
+  return tax;
+}
+
+// Self-employment tax (Schedule SE): on 92.35% of net profit, none under
+// $400 of that; 12.4% Social Security up to the year's wage base, 2.9%
+// Medicare on all of it. (Assumes no W-2 wages using up the wage base.)
+function selfEmploymentTax(netProfit, rules) {
+  const earnings = netProfit * 0.9235;
+  if (earnings < 400) return 0;
+  const ssBase = rules ? rules.ssWageBase : Infinity;
+  return Math.min(earnings, ssBase) * 0.124 + earnings * 0.029;
+}
+
+// Federal and South Carolina income tax estimates for one year
+function buildIncomeTaxes(a, status) {
+  const rules = TAX_RULES[a.year];
+  if (!rules) return null;
+  // Federal: AGI - standard deduction - QBI deduction = taxable income
+  const std = rules.standardDeduction[status];
+  const beforeQbi = Math.max(0, a.agi - std);
+  // QBI = business profit less the deductible half of SE tax. Consulting is
+  // a "specified service" business: the 20% deduction is only estimated
+  // below the threshold (above it, it shrinks or ends - ask your accountant).
+  const qbi = Math.max(0, a.netProfit - a.seTaxHalf);
+  const overQbiThreshold = beforeQbi > rules.qbiThreshold[status];
+  let qbiDeduction = 0;
+  if (!overQbiThreshold && qbi > 0) {
+    qbiDeduction = Math.min(qbi * 0.20, beforeQbi * 0.20);
+    // OBBBA minimum: at least $400 with $1,000+ of QBI (not above taxable income)
+    if (qbi >= 1000) qbiDeduction = Math.min(Math.max(qbiDeduction, 400), beforeQbi);
+  }
+  const fedTaxable = Math.max(0, beforeQbi - qbiDeduction);
+  const fedIncomeTax = bracketTax(fedTaxable, rules.brackets[status]);
+  // Additional Medicare tax: 0.9% of SE earnings above the threshold (Form 8959)
+  const addlMedicare = Math.max(0, a.netProfit * 0.9235 - rules.addlMedicare[status]) * 0.009;
+  // South Carolina: federal AGI - SCIAD = SC taxable income (no QBI for SC)
+  const sd = rules.sc.sciad[status];
+  let reduction = a.agi <= sd.start ? 0 : sd.amount * (a.agi - sd.start) / sd.range;
+  reduction = Math.floor(reduction / 10) * 10;
+  const sciad = Math.max(0, sd.amount - reduction);
+  const scTaxable = Math.max(0, a.agi - sciad);
+  const scIncomeTax = Math.max(0, rules.sc.tax(scTaxable));
+  const total = a.seTax + fedIncomeTax + addlMedicare + scIncomeTax;
+  return { status, std, beforeQbi, qbi, qbiDeduction, overQbiThreshold, fedTaxable, fedIncomeTax,
+           addlMedicare, sciad, scTaxable, scIncomeTax, total };
+}
+
 // Every number for one year - used by the page and the CSV export.
 function buildAccounting(year) {
   const live = (state.invoiceHistory || []).filter(r => !r.voided);
@@ -2134,10 +2237,10 @@ function buildAccounting(year) {
   const deductible = categories.reduce((sum, c) => sum + c.deductible, 0);
 
   const netProfit = revenue - deductible;
-  // Self-employment tax for a single-member LLC / sole proprietor (Schedule
-  // C): 15.3% on 92.35% of net profit, none under $400. Half of it is an
-  // adjustment to income. Ignores the Social Security wage cap.
-  const seTax = netProfit >= 400 ? netProfit * 0.9235 * 0.153 : 0;
+  // Self-employment tax for a single-member LLC / sole proprietor
+  // (Schedule SE) - see selfEmploymentTax. Half of it is an adjustment to
+  // income.
+  const seTax = selfEmploymentTax(netProfit, TAX_RULES[year]);
   const seTaxHalf = seTax / 2;
 
   // AGI the way the return builds it: net profit IS the business income
@@ -2148,9 +2251,12 @@ function buildAccounting(year) {
   const otherAdjustments = inputs.otherAdjustments || 0;
   const totalIncome = netProfit + otherIncome;
   const agi = totalIncome - seTaxHalf - otherAdjustments;
+  const filingStatus = FILING_STATUS_NAMES[inputs.filingStatus] ? inputs.filingStatus : 'single';
 
-  return { year, deposits, revenue, unpaid, unpaidTotal, expenses, categories, spent, deductible,
-           netProfit, seTax, seTaxHalf, otherIncome, totalIncome, otherAdjustments, agi };
+  const a = { year, deposits, revenue, unpaid, unpaidTotal, expenses, categories, spent, deductible,
+              netProfit, seTax, seTaxHalf, otherIncome, totalIncome, otherAdjustments, agi, filingStatus };
+  a.taxes = buildIncomeTaxes(a, filingStatus);
+  return a;
 }
 
 // Year picker: every year with a deposit or an expense, plus this year.
@@ -2184,7 +2290,8 @@ function renderAccounting() {
     <div class="summary-card"><div class="label">Total Deductible Expenses</div><div class="value">${fmtMoney(a.deductible)}</div></div>
     <div class="summary-card"><div class="label">Net Profit (Business Income)</div><div class="value">${fmtMoney(a.netProfit)}</div></div>
     <div class="summary-card"><div class="label">Est. AGI</div><div class="value">${fmtMoney(a.agi)}</div></div>
-    <div class="summary-card"><div class="label">Est. Self-Employment Tax</div><div class="value">${fmtMoney(a.seTax)}</div></div>`;
+    <div class="summary-card"><div class="label">Est. Self-Employment Tax</div><div class="value">${fmtMoney(a.seTax)}</div></div>
+    ${a.taxes ? `<div class="summary-card"><div class="label">Est. Total Tax</div><div class="value">${fmtMoney(a.taxes.total)}</div></div>` : ''}`;
 
   // 1. Deposits
   document.getElementById('acctDeposits').innerHTML = (a.deposits.length ? `
@@ -2254,15 +2361,55 @@ function renderAccounting() {
         ${line('Adjusted Gross Income (est.)', fmtMoney(a.agi), { total: true })}
       </tbody>
     </table>
-    <!-- SE tax is a tax you owe, not a step toward AGI - shown on its own -->
-    <table style="margin-top:14px">
-      <tbody>
-        ${line('Self-employment tax you owe (est.) ' + muted(`15.3% of 92.35% of net profit; paid with your return on Schedule SE. Half of it (${fmtMoney(a.seTaxHalf)}) is the adjustment above.`), fmtMoney(a.seTax))}
-      </tbody>
-    </table>
     <p style="color:var(--muted);font-size:0.8rem;margin:12px 0 0">
       Assumes Cirrobound files on Schedule C (single-member LLC or sole proprietor); if it's taxed as an S-corp the SE-tax lines don't apply.
       These are estimates &mdash; confirm with your accountant.
+    </p>`;
+  renderTaxes(a, line, muted);
+}
+
+// 4. Estimated taxes: SE tax, federal income tax, SC income tax, total
+function renderTaxes(a, line, muted) {
+  const status = document.getElementById('acctFilingStatus');
+  if (document.activeElement !== status) status.value = a.filingStatus;
+  const box = document.getElementById('acctTaxes');
+  const t = a.taxes;
+  const seLine = line('Self-employment tax ' + muted(`12.4% Social Security (up to the wage base) + 2.9% Medicare, on 92.35% of net profit &mdash; Schedule SE`), fmtMoney(a.seTax));
+  if (!t) {
+    box.innerHTML = `<table><tbody>${seLine}</tbody></table>
+      <p style="color:var(--muted);font-size:0.85rem;margin:10px 0 0">Federal and South Carolina income tax rules for ${a.year} aren't in the app yet (it has ${Object.keys(TAX_RULES).join(', ')}).</p>`;
+    return;
+  }
+  const pct = a.netProfit > 0 ? ` &mdash; about ${fmtPct(t.total / a.netProfit)} of net profit` : '';
+  box.innerHTML = `
+    <table>
+      <tbody>
+        ${line('Self-employment tax', '', { heading: true })}
+        ${line('Self-employment tax ' + muted('12.4% Social Security + 2.9% Medicare on 92.35% of net profit (Schedule SE)'), fmtMoney(a.seTax), { indent: true })}
+
+        ${line('Federal income tax', '', { heading: true })}
+        ${line('Adjusted Gross Income', fmtMoney(a.agi), { indent: true })}
+        ${line('Standard deduction ' + muted(`(${FILING_STATUS_NAMES[t.status]})`), '&minus;' + fmtMoney(t.std), { indent: true })}
+        ${line('Qualified business income deduction ' + muted(t.overQbiThreshold
+            ? '&mdash; not estimated: income is above the threshold where it shrinks for a consulting business'
+            : `20% of ${fmtMoney(t.qbi)} business income after half the SE tax`), '&minus;' + fmtMoney(t.qbiDeduction), { indent: true })}
+        ${line('Federal taxable income', fmtMoney(t.fedTaxable), { indent: true, subtotal: true })}
+        ${line('Federal income tax ' + muted(`${a.year} brackets`), fmtMoney(t.fedIncomeTax), { indent: true })}
+        ${t.addlMedicare ? line('Additional Medicare tax ' + muted('0.9% above the threshold (Form 8959)'), fmtMoney(t.addlMedicare), { indent: true }) : ''}
+
+        ${line('South Carolina income tax', '', { heading: true })}
+        ${line('Federal AGI ' + muted('(South Carolina starts here)'), fmtMoney(a.agi), { indent: true })}
+        ${line('SC Income Adjusted Deduction (SCIAD) ' + muted(`(${FILING_STATUS_NAMES[t.status]}${t.sciad === 0 ? ', fully phased out' : ''})`), '&minus;' + fmtMoney(t.sciad), { indent: true })}
+        ${line('SC taxable income', fmtMoney(t.scTaxable), { indent: true, subtotal: true })}
+        ${line('SC income tax ' + muted(t.scTaxable < 30000 ? '1.99%' : '5.21% minus $966'), fmtMoney(t.scIncomeTax), { indent: true })}
+
+        ${line('Total estimated tax' + muted(pct), fmtMoney(t.total), { total: true })}
+      </tbody>
+    </table>
+    <p style="color:var(--muted);font-size:0.8rem;margin:12px 0 0">
+      Uses the standard deduction (no itemizing) and leaves out tax credits, other deductions (e.g. the senior, tips or overtime deductions)
+      and anything already paid or withheld. With "Married filing jointly", put your spouse's income in Other income above.
+      South Carolina additions and subtractions other than the SCIAD aren't included. Estimates only &mdash; confirm with your accountant.
     </p>`;
 }
 
@@ -2753,7 +2900,8 @@ function saveAccountingYearInputs() {
   state.accountingYears[year] = {
     ...(state.accountingYears[year] || {}),   // keep the year's internet %
     otherIncome: parseFloat(document.getElementById('acctOtherIncome').value) || 0,
-    otherAdjustments: parseFloat(document.getElementById('acctOtherAdjustments').value) || 0
+    otherAdjustments: parseFloat(document.getElementById('acctOtherAdjustments').value) || 0,
+    filingStatus: document.getElementById('acctFilingStatus').value
   };
   save(); odAutoSave();
   renderAccounting();
@@ -2798,7 +2946,19 @@ function exportAccountingCSV() {
     ['Other adjustments', a.otherAdjustments.toFixed(2)],
     ['Adjusted Gross Income (est.)', a.agi.toFixed(2)],
     [],
-    ['Self-employment tax you owe (est.)', a.seTax.toFixed(2)]);
+    ['4. ESTIMATED TAXES' + (a.taxes ? ' (' + FILING_STATUS_NAMES[a.taxes.status] + ')' : '')],
+    ['Self-employment tax', a.seTax.toFixed(2)],
+    ...(a.taxes ? [
+      ['Standard deduction', a.taxes.std.toFixed(2)],
+      ['Qualified business income deduction', a.taxes.qbiDeduction.toFixed(2)],
+      ['Federal taxable income', a.taxes.fedTaxable.toFixed(2)],
+      ['Federal income tax', a.taxes.fedIncomeTax.toFixed(2)],
+      ['Additional Medicare tax', a.taxes.addlMedicare.toFixed(2)],
+      ['SC Income Adjusted Deduction (SCIAD)', a.taxes.sciad.toFixed(2)],
+      ['SC taxable income', a.taxes.scTaxable.toFixed(2)],
+      ['SC income tax', a.taxes.scIncomeTax.toFixed(2)],
+      ['Total estimated tax', a.taxes.total.toFixed(2)]
+    ] : [['Federal / SC income tax', 'rules for ' + a.year + ' not in the app']]));
   const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
   const link = document.createElement('a');
   link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
