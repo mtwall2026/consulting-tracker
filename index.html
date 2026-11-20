@@ -2139,15 +2139,18 @@ function buildAccounting(year) {
   // adjustment to income. Ignores the Social Security wage cap.
   const seTax = netProfit >= 400 ? netProfit * 0.9235 * 0.153 : 0;
   const seTaxHalf = seTax / 2;
-  const businessIncome = netProfit - seTaxHalf;
 
+  // AGI the way the return builds it: net profit IS the business income
+  // (Schedule C line 31); other income is added; half the SE tax and any
+  // other adjustments are then subtracted (Schedule 1, Part II).
   const inputs = (state.accountingYears || {})[year] || {};
   const otherIncome = inputs.otherIncome || 0;
   const otherAdjustments = inputs.otherAdjustments || 0;
-  const agi = businessIncome + otherIncome - otherAdjustments;
+  const totalIncome = netProfit + otherIncome;
+  const agi = totalIncome - seTaxHalf - otherAdjustments;
 
   return { year, deposits, revenue, unpaid, unpaidTotal, expenses, categories, spent, deductible,
-           netProfit, seTax, seTaxHalf, businessIncome, otherIncome, otherAdjustments, agi };
+           netProfit, seTax, seTaxHalf, otherIncome, totalIncome, otherAdjustments, agi };
 }
 
 // Year picker: every year with a deposit or an expense, plus this year.
@@ -2166,18 +2169,22 @@ function renderAccounting() {
   renderAccountingYearOptions();
   const a = buildAccounting(document.getElementById('acctYear').value);
   const muted = t => `<span style="color:var(--muted)">${t}</span>`;
+  // total: bold with a rule above; subtotal: rule above, normal weight;
+  // heading: a label with no amount (e.g. "Adjustments")
   const line = (label, value, opts = {}) => `
-    <tr${opts.total ? ' style="font-weight:700;border-top:2px solid var(--border)"' : ''}>
-      <td style="${opts.indent ? 'padding-left:28px' : ''}">${label}</td>
+    <tr${opts.total ? ' style="font-weight:700;border-top:2px solid var(--border)"'
+        : opts.subtotal ? ' style="border-top:1px solid var(--border)"' : ''}>
+      <td style="${opts.indent ? 'padding-left:28px' : ''}${opts.heading ? ';color:var(--muted);font-size:0.85rem' : ''}">${label}</td>
       <td class="amount" style="text-align:right">${value}</td>
     </tr>`;
 
   // Summary cards
   document.getElementById('acctSummary').innerHTML = `
     <div class="summary-card"><div class="label">Deposits</div><div class="value">${fmtMoney(a.revenue)}</div></div>
-    <div class="summary-card"><div class="label">Deductible Expenses</div><div class="value">${fmtMoney(a.deductible)}</div></div>
-    <div class="summary-card"><div class="label">Net Profit</div><div class="value">${fmtMoney(a.netProfit)}</div></div>
-    <div class="summary-card"><div class="label">Est. AGI</div><div class="value">${fmtMoney(a.agi)}</div></div>`;
+    <div class="summary-card"><div class="label">Total Deductible Expenses</div><div class="value">${fmtMoney(a.deductible)}</div></div>
+    <div class="summary-card"><div class="label">Net Profit (Business Income)</div><div class="value">${fmtMoney(a.netProfit)}</div></div>
+    <div class="summary-card"><div class="label">Est. AGI</div><div class="value">${fmtMoney(a.agi)}</div></div>
+    <div class="summary-card"><div class="label">Est. Self-Employment Tax</div><div class="value">${fmtMoney(a.seTax)}</div></div>`;
 
   // 1. Deposits
   document.getElementById('acctDeposits').innerHTML = (a.deposits.length ? `
@@ -2238,13 +2245,19 @@ function renderAccounting() {
       <tbody>
         ${line('Deposits (revenue)', fmtMoney(a.revenue))}
         ${expenseLines}
-        ${line('Net profit', fmtMoney(a.netProfit), { total: true })}
-        ${line('Self-employment tax (est.) ' + muted('15.3% of 92.35% of net profit &mdash; you owe this, it isn\'t subtracted here'), fmtMoney(a.seTax), { indent: true })}
-        ${line('Deductible half of SE tax', '&minus;' + fmtMoney(a.seTaxHalf), { indent: true })}
-        ${line('Business income', fmtMoney(a.businessIncome), { total: true })}
+        ${line('Total deductible expenses', '&minus;' + fmtMoney(a.deductible), { subtotal: true })}
+        ${line('Net profit ' + muted('&mdash; your business income (Schedule C, line 31)'), fmtMoney(a.netProfit), { total: true })}
         ${a.otherIncome ? line('Other income', '+' + fmtMoney(a.otherIncome), { indent: true }) : ''}
+        ${line('Adjustments to income', '', { heading: true })}
+        ${line('Deductible half of self-employment tax', '&minus;' + fmtMoney(a.seTaxHalf), { indent: true })}
         ${a.otherAdjustments ? line('Other adjustments', '&minus;' + fmtMoney(a.otherAdjustments), { indent: true }) : ''}
         ${line('Adjusted Gross Income (est.)', fmtMoney(a.agi), { total: true })}
+      </tbody>
+    </table>
+    <!-- SE tax is a tax you owe, not a step toward AGI - shown on its own -->
+    <table style="margin-top:14px">
+      <tbody>
+        ${line('Self-employment tax you owe (est.) ' + muted(`15.3% of 92.35% of net profit; paid with your return on Schedule SE. Half of it (${fmtMoney(a.seTaxHalf)}) is the adjustment above.`), fmtMoney(a.seTax))}
       </tbody>
     </table>
     <p style="color:var(--muted);font-size:0.8rem;margin:12px 0 0">
@@ -2777,13 +2790,15 @@ function exportAccountingCSV() {
     isMileage(e) ? e.miles : '', isMileage(e) ? e.mileRate : '', e.from || '', e.to || '', e.roundTrip ? 'Yes' : '']));
   rows.push(['', '', 'Total', a.spent.toFixed(2), a.deductible.toFixed(2)], [],
     ['3. AGI'],
-    ['Net profit', a.netProfit.toFixed(2)],
-    ['Self-employment tax (est.)', a.seTax.toFixed(2)],
-    ['Deductible half of SE tax', a.seTaxHalf.toFixed(2)],
-    ['Business income', a.businessIncome.toFixed(2)],
+    ['Deposits (revenue)', a.revenue.toFixed(2)],
+    ['Total deductible expenses', a.deductible.toFixed(2)],
+    ['Net profit - business income (Schedule C line 31)', a.netProfit.toFixed(2)],
     ['Other income', a.otherIncome.toFixed(2)],
+    ['Deductible half of self-employment tax', a.seTaxHalf.toFixed(2)],
     ['Other adjustments', a.otherAdjustments.toFixed(2)],
-    ['Adjusted Gross Income (est.)', a.agi.toFixed(2)]);
+    ['Adjusted Gross Income (est.)', a.agi.toFixed(2)],
+    [],
+    ['Self-employment tax you owe (est.)', a.seTax.toFixed(2)]);
   const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
   const link = document.createElement('a');
   link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
