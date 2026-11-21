@@ -236,6 +236,9 @@
       color: var(--text); padding: 7px 9px; font-size: 0.9rem;
     }
     .tax-inputs input:focus, .tax-inputs select:focus { outline: none; border-color: var(--accent); }
+    .tax-inputs .hint { grid-column: 1 / -1; font-size: 0.76rem; color: var(--muted); margin-top: -6px; }
+    .tax-panel .pnote { font-size: 0.74rem; color: var(--muted); margin: 8px 0 0; line-height: 1.45; }
+    .tax-panel .pnote.warn { color: #fbbf24; }
     /* The worked-out panels */
     .tax-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
     .tax-panel { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
@@ -1017,6 +1020,104 @@
     </div>
   </div>
 
+  <!-- Home office write-off and itemized deductions (Schedule A). Whole-house
+       amounts go in; the app takes the office's share and applies the IRS
+       limits (see buildHomeOffice / buildItemized). -->
+  <div class="card">
+    <h2>Home Office &amp; Deductions</h2>
+    <p style="color:var(--muted);font-size:0.82rem;margin:-6px 0 14px">Enter whole-house amounts &mdash; the app works out the office's share and applies the IRS limits. The home's details are kept for every year; the amounts are saved for the selected year.</p>
+    <div class="tax-inputs">
+      <div class="group">Period &amp; method</div>
+      <label>Amounts below cover January through
+        <select data-homeyear="throughMonth" data-default="12" onchange="saveHomeInputs()"><option value="1">January</option><option value="2">February</option><option value="3">March</option><option value="4">April</option><option value="5">May</option><option value="6">June</option><option value="7">July</option><option value="8">August</option><option value="9">September</option><option value="10">October</option><option value="11">November</option><option value="12">December</option></select>
+      </label>
+      <label>Home office method
+        <select data-homeyear="method" data-kind="text" data-default="auto" onchange="saveHomeInputs()">
+          <option value="auto">Whichever is larger</option>
+          <option value="simplified">Simplified ($5 a sq ft)</option>
+          <option value="actual">Actual costs (Form 8829)</option>
+          <option value="none">No home office</option>
+        </select>
+      </label>
+      <div class="hint">Pick the last month your amounts cover &mdash; e.g. August if you've entered January to August so far, December for the whole year. Only the months the office was in use count.</div>
+      <div class="group">The home (kept for every year)</div>
+      <label>Office square feet
+        <input type="number" data-home="officeSqft" min="0" step="1" placeholder="e.g. 150" onchange="saveHomeInputs()" />
+      </label>
+      <label>Whole home square feet
+        <input type="number" data-home="homeSqft" min="0" step="1" placeholder="e.g. 2,000" onchange="saveHomeInputs()" />
+      </label>
+      <label>Office first used for work &mdash; month
+        <select data-home="startMonth" data-default="1" onchange="saveHomeInputs()"><option value="1">January</option><option value="2">February</option><option value="3">March</option><option value="4">April</option><option value="5">May</option><option value="6">June</option><option value="7">July</option><option value="8">August</option><option value="9">September</option><option value="10">October</option><option value="11">November</option><option value="12">December</option></select>
+      </label>
+      <label>&hellip;and year
+        <input type="number" data-home="startYear" min="0" step="1" placeholder="e.g. 2026" onchange="saveHomeInputs()" />
+      </label>
+      <label>Price paid for the home, plus improvements
+        <input type="number" data-home="price" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" />
+      </label>
+      <label>Home value when the office started (county market value)
+        <input type="number" data-home="homeValue" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" />
+      </label>
+      <label>&hellip;of which the building (county improvement value)
+        <input type="number" data-home="buildingValue" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" />
+      </label>
+      <div class="group">Home costs &mdash; whole house</div>
+      <label>Mortgage interest
+        <input type="number" data-homeyear="mortgageInterest" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" />
+      </label>
+      <label>Mortgage insurance (PMI)
+        <input type="number" data-homeyear="pmi" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" />
+      </label>
+      <label>Property tax
+        <input type="number" data-homeyear="propertyTax" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" />
+      </label>
+      <label>Homeowners insurance
+        <input type="number" data-homeyear="insurance" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" />
+      </label>
+      <label>Electricity
+        <input type="number" data-homeyear="electricity" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" />
+      </label>
+      <label>Water
+        <input type="number" data-homeyear="water" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" />
+      </label>
+      <label>Other utilities (gas, sewer, trash)
+        <input type="number" data-homeyear="otherUtilities" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" />
+      </label>
+      <label>Whole-house repairs
+        <input type="number" data-homeyear="repairs" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" />
+      </label>
+      <label>Office-only costs (e.g. painting the office)
+        <input type="number" data-homeyear="direct" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" />
+      </label>
+      <label>Carried over from last year &mdash; running costs
+        <input type="number" data-homeyear="priorOperating" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" />
+      </label>
+      <label>Carried over from last year &mdash; depreciation
+        <input type="number" data-homeyear="priorDepreciation" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" />
+      </label>
+      <div class="group">Other personal deductions (Schedule A)</div>
+      <label>SC income tax paid (withheld or estimated payments)
+        <input type="number" data-itemized="stateIncomeTax" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" />
+      </label>
+      <label>Car property tax
+        <input type="number" data-itemized="carTax" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" />
+      </label>
+      <label>Other state &amp; local taxes
+        <input type="number" data-itemized="otherTaxes" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" />
+      </label>
+      <label>Medical &amp; dental, out of pocket
+        <input type="number" data-itemized="medical" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" />
+      </label>
+      <label>Charity &mdash; cash, check or card
+        <input type="number" data-itemized="charityCash" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" />
+      </label>
+      <label>Charity &mdash; goods (clothes, household items)
+        <input type="number" data-itemized="charityGoods" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" />
+      </label>
+    </div>
+  </div>
+
   <!-- The worked-out estimate, panel by panel -->
   <div class="card">
     <h2>How It's Worked Out</h2>
@@ -1127,6 +1228,8 @@ function migrateState(s) {
   if (!s.accountingYears) s.accountingYears = {};
   // Address/phone for the invoice header (Accounting tab > Business Info)
   if (!s.businessInfo) s.businessInfo = { address: '', phone: '' };
+  // The home's details for the home office write-off (Taxes tab)
+  if (!s.homeOffice) s.homeOffice = {};
   // 'Utilities, Phone & Internet' was split into 'Utilities & Phone' (100%)
   // and 'Internet' (business-use %). Older entries keep their 100% share.
   s.businessExpenses.forEach(e => {
@@ -1150,6 +1253,7 @@ function defaultState() {
     businessExpenses: [],
     accountingYears: {},
     businessInfo: { address: '', phone: '' },
+    homeOffice: {},
     nextInvoiceNum: 1001
   };
 }
@@ -2261,6 +2365,20 @@ const TAX_RULES = {
       2: { rate: 0.40,   max: 7316, phaseRate: 0.2106, start: { mfj: 31160, other: 23890 } },
       3: { rate: 0.45,   max: 8231, phaseRate: 0.2106, start: { mfj: 31160, other: 23890 } }
     },
+    // Itemized deductions (Schedule A) as changed by the One Big Beautiful
+    // Bill Act (P.L. 119-21): IRC 164(b)(7) state & local tax cap, 213(a)
+    // medical floor, 170(b)(1)(I) 0.5% charity floor and 170(b)(1)(A)/(G)
+    // limits, 170(p) cash charity without itemizing (IRS: $1,000 / $2,000
+    // joint from 2026), 163(h)(3)(E)-(F) mortgage insurance counted as
+    // interest again from 2026, and 68's 2/37 cut in the 37% bracket.
+    itemized: {
+      saltCap: 40400, saltPhaseStart: 505000, saltPhaseRate: 0.30, saltFloor: 10000,
+      medicalFloor: 0.075,
+      charityFloor: 0.005, charityCashLimit: 0.60, charityGoodsLimit: 0.50,
+      nonItemizerCharity: { single: 1000, hoh: 1000, mfj: 2000 },
+      // PMI: less 10% for each $1,000 (or part) of AGI over $100,000
+      pmi: { phaseoutStart: 100000, step: 1000, cutPerStep: 0.10 }
+    },
     sc: {
       // Dependent exemption per dependent (Section 12-6-1140(13)), plus the
       // same again for each dependent under 6 (12-6-1160). SCDOR hasn't
@@ -2279,6 +2397,169 @@ const TAX_RULES = {
   }
 };
 const FILING_STATUS_NAMES = { single: 'Single', mfj: 'Married filing jointly', hoh: 'Head of household' };
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// -- Home office (Schedule C line 30) --------------------------------------
+// Rules that don't change by year. Sources: IRS Instructions for Form 8829
+// and Pub. 587. Simplified method: $5 a square foot, at most 300 sq ft, by
+// the months the office was used, and no more than the business's profit.
+// Depreciation: the office's part of the house is 39-year property - the
+// first year's % depends on the month it was first used for business, then
+// 2.564% a year (Form 8829 line 41 table).
+const HOME_OFFICE_RULES = {
+  simplifiedRate: 5, simplifiedMaxSqft: 300,
+  firstYearPct: [2.461, 2.247, 2.033, 1.819, 1.605, 1.391, 1.177, 0.963, 0.749, 0.535, 0.321, 0.107],
+  yearlyPct: 2.564, years: 39
+};
+
+// Share of mortgage insurance (PMI) that counts as mortgage interest: all of
+// it up to $100,000 of AGI, then 10% less for each $1,000 (or part) over.
+// Years without rules in TAX_RULES count it in full.
+function pmiShare(agi, rules) {
+  const p = rules && rules.itemized && rules.itemized.pmi;
+  if (!p) return 1;
+  return Math.max(0, 1 - p.cutPerStep * Math.ceil(Math.max(0, agi - p.phaseoutStart) / p.step));
+}
+
+// Depreciation of the office's part of the house for one year (Form 8829
+// Part III), up to `throughMonth`.
+function homeDepreciation(H, yr, throughMonth, pct) {
+  const R = HOME_OFFICE_RULES;
+  const out = { amount: 0, basis: 0, rate: 0, missing: '' };
+  const startYear = parseInt(H.startYear, 10) || 0;
+  const startMonth = Math.min(12, Math.max(1, parseInt(H.startMonth, 10) || 1));
+  const price = H.price || 0, value = H.homeValue || 0, building = H.buildingValue || 0;
+  if (!startYear) { out.missing = 'the year the office was first used'; return out; }
+  if (!price || !value || !building || building > value) { out.missing = 'the price paid and the two county values'; return out; }
+  // Line 37: what the home cost (with land) or, if less, its value when the
+  // office started. Line 38: the land the same way - its cost, split by the
+  // county's land share, or its value if less. The building is the rest.
+  const landValue = value - building;
+  const line37 = Math.min(price, value);
+  const line38 = Math.min(price * landValue / value, landValue);
+  out.basis = (line37 - line38) * pct;
+  const n = yr - startYear;   // 0 = the year the office started
+  const first = R.firstYearPct[startMonth - 1];
+  let rate = 0;
+  if (n === 0) {
+    // Whole first year from the table; part of it scaled by half-months
+    // (mid-month convention) up to throughMonth
+    rate = throughMonth < startMonth ? 0 : throughMonth === 12 ? first
+      : first * (throughMonth - startMonth + 0.5) / (12 - startMonth + 0.5);
+  } else if (n > 0 && n < R.years) {
+    rate = R.yearlyPct * throughMonth / 12;
+  } else if (n === R.years) {
+    // Last year: whatever is left
+    rate = Math.max(0, 100 - first - (R.years - 1) * R.yearlyPct) * Math.min(1, throughMonth / 12);
+  }
+  out.rate = rate;
+  out.amount = out.basis * rate / 100;
+  return out;
+}
+
+// Home office write-off for a year: both methods worked out, and the one in
+// use (the larger, unless one is picked). profitBeforeHome is the
+// business's profit before it (Form 8829 line 8 - the limit). itemizing:
+// whether Schedule A is used, which decides where the office's mortgage
+// interest and property tax go on Form 8829.
+function buildHomeOffice(year, profitBeforeHome, agiBeforeHome, itemizing) {
+  const R = HOME_OFFICE_RULES;
+  const H = state.homeOffice || {};
+  const y = (((state.accountingYears || {})[year] || {}).home) || {};
+  const throughMonth = Math.min(12, Math.max(1, parseInt(y.throughMonth, 10) || 12));
+  const method = ['auto', 'simplified', 'actual', 'none'].includes(y.method) ? y.method : 'auto';
+  const officeSqft = H.officeSqft || 0, homeSqft = H.homeSqft || 0;
+  const yr = parseInt(year, 10);
+  const startYear = parseInt(H.startYear, 10) || 0;
+  const startMonth = Math.min(12, Math.max(1, parseInt(H.startMonth, 10) || 1));
+  // First month of this year the office was in use (13 = not in use yet).
+  // No start year entered: taken as in use the whole year.
+  const firstMonth = !startYear || startYear < yr ? 1 : startYear === yr ? startMonth : 13;
+  const months = Math.max(0, throughMonth - firstMonth + 1);
+  const ho = { throughMonth, method, officeSqft, homeSqft, firstMonth, months, pct: 0, share: 0,
+               simplified: 0, simplifiedRaw: 0, actual: 0, deduction: 0, used: 'none' };
+  if (!officeSqft || method === 'none' || !months) return ho;
+
+  const pct = homeSqft > 0 ? Math.min(1, officeSqft / homeSqft) : 0;
+  // The amounts entered cover January..throughMonth; only the months the
+  // office was in use count toward it
+  const share = pct * months / throughMonth;
+  const limit = Math.max(0, profitBeforeHome);
+
+  // Simplified method
+  const simplifiedRaw = R.simplifiedRate * Math.min(officeSqft, R.simplifiedMaxSqft) * months / 12;
+  const simplified = Math.min(simplifiedRaw, limit);
+
+  // Actual costs (Form 8829)
+  const n = k => Math.max(0, parseFloat(y[k]) || 0);
+  const pmiRatio = pmiShare(agiBeforeHome, TAX_RULES[year]);
+  const mortgageBiz = (n('mortgageInterest') + n('pmi') * pmiRatio) * share;
+  const taxBiz = n('propertyTax') * share;
+  const operatingBiz = (n('insurance') + n('electricity') + n('water') + n('otherUtilities') + n('repairs')) * share;
+  const direct = n('direct');
+  // Itemizing: the office's mortgage interest and property tax are lines
+  // 10-11 and always allowed. Standard deduction: they go on lines 16-17
+  // with the other running costs and share the profit limit. (Property tax
+  // over the state & local tax cap would also move to line 17 - with a
+  // $40,400 cap that's rare, so it isn't worked out.)
+  const tier1 = itemizing ? mortgageBiz + taxBiz : 0;
+  const tier2 = (itemizing ? 0 : mortgageBiz + taxBiz) + operatingBiz + direct + n('priorOperating');
+  const room = Math.max(0, limit - tier1);
+  const allowed2 = Math.min(tier2, room);
+  const dep = homeDepreciation(H, yr, throughMonth, pct);
+  const tier3 = dep.amount + n('priorDepreciation');
+  const allowed3 = Math.min(tier3, room - allowed2);
+  const actual = tier1 + allowed2 + allowed3;
+
+  const used = method === 'auto' ? (actual > simplified ? 'actual' : 'simplified') : method;
+  return Object.assign(ho, {
+    pct, share, limit, simplifiedRaw, simplified, pmiRatio, mortgageBiz, taxBiz, operatingBiz, direct,
+    priorOperating: n('priorOperating'), priorDepreciation: n('priorDepreciation'), dep,
+    tier1, tier2, tier3, allowed2, allowed3, actual,
+    // Not allowed this year (over the profit limit) - carried to next year
+    carryOperating: tier2 - allowed2, carryDepreciation: tier3 - allowed3,
+    used, deduction: used === 'actual' ? actual : simplified
+  });
+}
+
+// -- Itemized deductions (Schedule A) --------------------------------------
+// The year's itemized total from the amounts entered, with each limit
+// applied (see TAX_RULES[year].itemized). The home's share used for the
+// office (Form 8829 only) is left out.
+function buildItemized(year, agi, ho, status) {
+  const rules = TAX_RULES[year];
+  if (!rules || !rules.itemized) return null;
+  const r = rules.itemized;
+  const yIn = (state.accountingYears || {})[year] || {};
+  const y = yIn.itemized || {}, h = yIn.home || {};
+  const n = (o, k) => Math.max(0, parseFloat(o[k]) || 0);
+  const base = Math.max(0, agi);
+  const personal = 1 - (ho.used === 'actual' ? ho.share : 0);
+  // Medical & dental: only the part over 7.5% of AGI
+  const medicalPaid = n(y, 'medical');
+  const medicalFloor = r.medicalFloor * base;
+  const medical = Math.max(0, medicalPaid - medicalFloor);
+  // State & local taxes: SC income tax paid + the home's property tax + car
+  // property tax + other, up to the cap. The cap drops by 30% of AGI over
+  // $505,000, but not below $10,000.
+  const saltCap = Math.max(r.saltFloor, r.saltCap - r.saltPhaseRate * Math.max(0, agi - r.saltPhaseStart));
+  const saltPaid = n(y, 'stateIncomeTax') + n(h, 'propertyTax') * personal + n(y, 'carTax') + n(y, 'otherTaxes');
+  const salt = Math.min(saltPaid, saltCap);
+  // Mortgage interest + PMI (cut back above $100,000 of AGI). Assumes the
+  // loan bought, built or improved the home and is $750,000 or less.
+  const pmiRatio = pmiShare(agi, rules);
+  const mortgage = (n(h, 'mortgageInterest') + n(h, 'pmi') * pmiRatio) * personal;
+  // Charity: goods up to 50% of AGI, cash up to 60% less the goods; then
+  // only the part over 0.5% of AGI counts (new for 2026)
+  const charityCash = n(y, 'charityCash'), charityGoods = n(y, 'charityGoods');
+  const goodsOk = Math.min(charityGoods, r.charityGoodsLimit * base);
+  const cashOk = Math.min(charityCash, Math.max(0, r.charityCashLimit * base - goodsOk));
+  const charityFloor = r.charityFloor * base;
+  const charity = Math.max(0, cashOk + goodsOk - charityFloor);
+  const total = medical + salt + mortgage + charity;
+  return { medicalPaid, medicalFloor, medical, saltCap, saltPaid, salt, pmiRatio, mortgage,
+           charityCash, charityGoods, charityFloor, charity, total, personal };
+}
 
 // Tax on taxable income from a bracket table
 function bracketTax(ti, brackets) {
@@ -2305,9 +2586,22 @@ function selfEmploymentTax(netProfit, rules) {
 function buildIncomeTaxes(a, status) {
   const rules = TAX_RULES[a.year];
   if (!rules) return null;
-  // Federal: AGI - standard deduction - QBI deduction = taxable income
+  // Federal: AGI - the standard or itemized deduction (whichever is
+  // larger) - QBI deduction = taxable income
   const std = rules.standardDeduction[status];
-  const beforeQbi = Math.max(0, a.agi - std);
+  const it = a.itemized;   // Schedule A - see buildItemized
+  let itemizedAllowed = it ? it.total : 0;
+  // Section 68 (2026 on): itemized deductions are cut by 2/37 of the smaller
+  // of the total or the taxable income that reaches the 37% bracket
+  const bk = rules.brackets[status];
+  const over37 = Math.max(0, a.agi - itemizedAllowed - bk[bk.length - 2][0]);
+  const sec68 = itemizedAllowed && over37 ? (2 / 37) * Math.min(itemizedAllowed, over37) : 0;
+  itemizedAllowed -= sec68;
+  const itemizing = itemizedAllowed > std;
+  const deduction = itemizing ? itemizedAllowed : std;
+  // Not itemizing: cash gifts to charity still count, up to $1,000 ($2,000 joint)
+  const charityNoItemize = !itemizing && it ? Math.min(it.charityCash, rules.itemized.nonItemizerCharity[status]) : 0;
+  const beforeQbi = Math.max(0, a.agi - deduction - charityNoItemize);
   // QBI = business profit less the deductible half of SE tax. Consulting is
   // a "specified service" business: the 20% deduction is only estimated
   // below the threshold (above it, it shrinks or ends - ask your accountant).
@@ -2364,11 +2658,13 @@ function buildIncomeTaxes(a, status) {
   const beforeCredits = a.seTax + fedIncomeTax + addlMedicare + scIncomeTax;
   // Refundable credits (ACTC, EIC) can take the total below zero = a refund
   const total = a.seTax + fedAfterCtc + addlMedicare + scAfterCredits - actc - eitc;
-  // What's left after taxes: net profit (+ any wages and other income the
-  // household had) minus the total tax - plus the refund when it's negative
-  const income = a.netProfit + a.wages + a.otherIncome;
+  // What's left after taxes: the business's profit (+ any wages and other
+  // income the household had) minus the total tax - plus the refund when
+  // it's negative. The home office write-off isn't taken off: it lowers the
+  // taxes, but the house costs are paid either way.
+  const income = a.profitBeforeHome + a.wages + a.otherIncome;
   const takeHome = income - total;
-  return { status, std, beforeQbi, qbi, qbiDeduction, overQbiThreshold, fedTaxable, fedIncomeTax,
+  return { status, std, itemizedAllowed, sec68, itemizing, deduction, charityNoItemize, beforeQbi, qbi, qbiDeduction, overQbiThreshold, fedTaxable, fedIncomeTax,
            addlMedicare, sciad, scDependents, scTaxable, scIncomeTax, earned, eitc, ctcFull, ctcUsed,
            actc, fedAfterCtc, scEitc, scAfterCredits, beforeCredits, total, income, takeHome };
 }
@@ -2396,30 +2692,51 @@ function buildAccounting(year) {
   const spent = categories.reduce((sum, c) => sum + c.spent, 0);
   const deductible = categories.reduce((sum, c) => sum + c.deductible, 0);
 
-  const netProfit = revenue - deductible;
-  // Self-employment tax for a single-member LLC / sole proprietor
-  // (Schedule SE) - see selfEmploymentTax. Half of it is an adjustment to
-  // income.
-  const seTax = selfEmploymentTax(netProfit, TAX_RULES[year]);
-  const seTaxHalf = seTax / 2;
+  // The business's profit before the home office write-off (Schedule C
+  // line 29, "tentative profit")
+  const profitBeforeHome = revenue - deductible;
 
-  // AGI the way the return builds it: net profit IS the business income
-  // (Schedule C line 31); other income is added; half the SE tax and any
-  // other adjustments are then subtracted (Schedule 1, Part II).
   const inputs = (state.accountingYears || {})[year] || {};
   const wages = inputs.wages || 0;
   const otherIncome = inputs.otherIncome || 0;
   const otherAdjustments = inputs.otherAdjustments || 0;
-  const totalIncome = netProfit + wages + otherIncome;
   // Children claimed (all ages), and how many are under 17 / under 6
   const kids = Math.max(0, Math.floor(inputs.kids || 0));
   const kidsUnder17 = Math.min(kids, Math.max(0, Math.floor(inputs.kidsUnder17 || 0)));
   const kidsUnder6 = Math.min(kidsUnder17, Math.max(0, Math.floor(inputs.kidsUnder6 || 0)));
-  const agi = totalIncome - seTaxHalf - otherAdjustments;
   const filingStatus = FILING_STATUS_NAMES[inputs.filingStatus] ? inputs.filingStatus : 'single';
+  const rules = TAX_RULES[year];
+
+  // Net profit, SE tax and AGI once the home office write-off is known.
+  // Net profit IS the business income (Schedule C line 31: profit less the
+  // home office, line 30). SE tax for a single-member LLC / sole proprietor
+  // (Schedule SE) - see selfEmploymentTax. AGI the way the return builds
+  // it: other income added, then half the SE tax and other adjustments
+  // subtracted (Schedule 1, Part II).
+  const figure = homeOffice => {
+    const netProfit = profitBeforeHome - homeOffice.deduction;
+    const seTax = selfEmploymentTax(netProfit, rules);
+    const seTaxHalf = seTax / 2;
+    const totalIncome = netProfit + wages + otherIncome;
+    const agi = totalIncome - seTaxHalf - otherAdjustments;
+    return { netProfit, seTax, seTaxHalf, totalIncome, agi };
+  };
+  // AGI before any home office - it sets how much of the PMI counts there
+  const agiBeforeHome = figure({ deduction: 0 }).agi;
+  // Worked first as if taking the standard deduction; if itemizing comes out
+  // larger, Form 8829 is worked again with mortgage interest and property
+  // tax in their itemizer lines (that only changes it when profit is small)
+  let homeOffice = buildHomeOffice(year, profitBeforeHome, agiBeforeHome, false);
+  let f = figure(homeOffice);
+  let itemized = buildItemized(year, f.agi, homeOffice, filingStatus);
+  if (itemized && homeOffice.used === 'actual' && itemized.total > rules.standardDeduction[filingStatus]) {
+    homeOffice = buildHomeOffice(year, profitBeforeHome, agiBeforeHome, true);
+    f = figure(homeOffice);
+    itemized = buildItemized(year, f.agi, homeOffice, filingStatus);
+  }
 
   const a = { year, deposits, revenue, unpaid, unpaidTotal, expenses, categories, spent, deductible,
-              netProfit, seTax, seTaxHalf, wages, otherIncome, totalIncome, otherAdjustments, agi, filingStatus,
+              profitBeforeHome, homeOffice, itemized, ...f, wages, otherIncome, otherAdjustments, filingStatus,
               kids, kidsUnder17, kidsUnder6 };
   a.taxes = buildIncomeTaxes(a, filingStatus);
   return a;
@@ -2517,6 +2834,8 @@ function renderAccounting() {
         ${line('Deposits (revenue)', fmtMoney(a.revenue))}
         ${expenseLines}
         ${line('Total deductible expenses', '&minus;' + fmtMoney(a.deductible), { subtotal: true })}
+        ${a.homeOffice.deduction ? line('Home office ' + muted(`&mdash; ${a.homeOffice.used === 'actual' ? 'actual costs (Form 8829)' : 'simplified method'}, set on the Taxes tab (Schedule C, line 30)`),
+            '&minus;' + fmtMoney(a.homeOffice.deduction), { indent: true }) : ''}
         ${line('Net profit ' + muted('&mdash; your business income (Schedule C, line 31)'), fmtMoney(a.netProfit), { total: true })}
       </tbody>
     </table>
@@ -2535,7 +2854,7 @@ function taxRow(label, amount, opts = {}) {
   const sign = opts.minus ? '&minus;' : opts.plus ? '+' : '';
   return `<div class="tax-row${opts.sub ? ' sub' : ''}${opts.total ? ' total' : ''}">
       <span class="lbl">${label}${opts.note ? `<span class="note">${opts.note}</span>` : ''}</span>
-      <span class="amt${opts.minus ? ' minus' : ''}">${sign}${fmtMoney(amount)}</span>
+      <span class="amt${opts.minus ? ' minus' : ''}">${opts.text !== undefined ? opts.text : sign + fmtMoney(amount)}</span>
     </div>`;
 }
 // A titled panel of rows; `form` is the tax form it matches, shown small
@@ -2559,6 +2878,16 @@ function renderTaxes(a) {
   fill('acctWages', inputs.wages || '');
   fill('acctOtherIncome', inputs.otherIncome || '');
   fill('acctOtherAdjustments', inputs.otherAdjustments || '');
+  // Home Office & Deductions boxes: the home's details, then this year's
+  // amounts (blank for 0; a picker shows its default when unset)
+  const fillAll = (key, src) => document.querySelectorAll(`[data-${key}]`).forEach(el => {
+    if (document.activeElement === el) return;
+    const v = src[el.dataset[key]];
+    el.value = v === undefined || v === '' || v === 0 ? (el.dataset.default || '') : v;
+  });
+  fillAll('home', state.homeOffice || {});
+  fillAll('homeyear', inputs.home || {});
+  fillAll('itemized', inputs.itemized || {});
 
   const t = a.taxes;
   const rules = TAX_RULES[a.year];
@@ -2568,8 +2897,10 @@ function renderTaxes(a) {
   const ssPart = seApplies ? Math.min(earnings, rules ? rules.ssWageBase : Infinity) * 0.124 : 0;
   const medPart = seApplies ? earnings * 0.029 : 0;
 
+  const homePanel = homeOfficePanel(a);
   const agiPanel = taxPanel('Adjusted gross income', 'Schedule 1',
-    taxRow('Net profit', a.netProfit, { note: 'Business income &mdash; Schedule C, line 31' }) +
+    taxRow('Net profit', a.netProfit, { note: a.homeOffice.deduction
+      ? 'Business income after the home office &mdash; Schedule C, line 31' : 'Business income &mdash; Schedule C, line 31' }) +
     (a.wages ? taxRow('W-2 wages', a.wages, { plus: true }) : '') +
     (a.otherIncome ? taxRow('Other income', a.otherIncome, { plus: true }) : '') +
     taxRow('Half of self-employment tax', a.seTaxHalf, { minus: true, note: 'Adjustment to income' }) +
@@ -2589,11 +2920,11 @@ function renderTaxes(a) {
       <div class="tax-hero">
         <div class="tax-hero-main owe">
           <div class="k">Take-home after self-employment tax &middot; ${a.year}</div>
-          <div class="v">${fmtMoney(a.netProfit + a.wages + a.otherIncome - a.seTax)}</div>
+          <div class="v">${fmtMoney(a.profitBeforeHome + a.wages + a.otherIncome - a.seTax)}</div>
           <div class="s">Federal and South Carolina income tax rules for ${a.year} aren't in the app yet (it has ${Object.keys(TAX_RULES).join(', ')}), so income tax isn't included.</div>
         </div>
       </div>`;
-    box.innerHTML = `<div class="tax-grid">${agiPanel}${sePanel}</div>`;
+    box.innerHTML = `<div class="tax-grid">${homePanel}${agiPanel}${sePanel}</div>`;
     return;
   }
 
@@ -2604,7 +2935,7 @@ function renderTaxes(a) {
       <div class="tax-hero-main${refund ? '' : ' owe'}">
         <div class="k">Take-home after taxes &middot; ${a.year}</div>
         <div class="v">${fmtMoney(t.takeHome)}</div>
-        <div class="s">${a.wages || a.otherIncome ? 'Net profit, wages and other income' : 'Net profit'} ${fmtMoney(t.income)}
+        <div class="s">${a.homeOffice.deduction ? 'Business profit (before the home office write-off)' : 'Net profit'}${a.wages || a.otherIncome ? ', wages and other income' : ''} ${fmtMoney(t.income)}
           ${refund ? `+ estimated refund ${fmtMoney(-t.total)}.<br>The refund comes after you file.` : `&minus; estimated tax ${fmtMoney(t.total)}.`}</div>
       </div>
       <div class="tax-hero-stats">
@@ -2620,7 +2951,8 @@ function renderTaxes(a) {
   const status = FILING_STATUS_NAMES[t.status];
   const fedPanel = taxPanel('Federal income tax', 'Form 1040',
     taxRow('Adjusted gross income', a.agi) +
-    taxRow('Standard deduction', t.std, { minus: true, note: status }) +
+    taxRow(t.itemizing ? 'Itemized deductions' : 'Standard deduction', t.deduction, { minus: true, note: t.itemizing ? 'Schedule A &mdash; more than the standard deduction' : status }) +
+    (t.charityNoItemize ? taxRow('Charity deduction', t.charityNoItemize, { minus: true, note: 'Cash gifts, without itemizing' }) : '') +
     taxRow('Qualified business income deduction', t.qbiDeduction, { minus: true, note: t.overQbiThreshold
       ? 'Not estimated above the threshold for a consulting business'
       : '20% of business income after half the SE tax' }) +
@@ -2645,7 +2977,7 @@ function renderTaxes(a) {
     taxRow('Refundable credits', t.actc + t.eitc, { total: true })) : '';
 
   box.innerHTML = `
-    <div class="tax-grid">${agiPanel}${sePanel}${fedPanel}${scPanel}${creditPanel}</div>
+    <div class="tax-grid">${homePanel}${agiPanel}${sePanel}${deductionPanel(a)}${fedPanel}${scPanel}${creditPanel}</div>
     <div class="tax-bottom">
       <div><span>Self-employment tax</span><b>${fmtMoney(a.seTax)}</b></div>
       <div><span>Federal income tax</span><b>${fmtMoney(t.fedAfterCtc + t.addlMedicare)}</b></div>
@@ -2655,12 +2987,106 @@ function renderTaxes(a) {
       <div class="final"><span>Take-home after taxes</span><b>${fmtMoney(t.takeHome)}</b></div>
     </div>
     <p class="tax-foot">
-      Assumes Cirrobound files on Schedule C (single-member LLC). Uses the standard deduction (no itemizing).
+      Assumes Cirrobound files on Schedule C (single-member LLC). Uses the standard or itemized deduction, whichever is
+      larger; itemizing assumes the mortgage bought, built or improved the home and is $750,000 or less. The home office
+      write-off lowers the taxes but not take-home, since the house costs are paid either way.
       Credits included: child tax credit, earned income credit and SC's earned income credit &mdash; not others (child care,
       education) or other deductions (senior, tips, overtime), and nothing already paid or withheld. Children are assumed to
       qualify (dependents with Social Security numbers; for the earned income credit, under 19 or a full-time student under 24,
       and investment income under $12,200). Estimates only &mdash; confirm with your accountant.
     </p>`;
+}
+
+// "Jan-Aug (8 months)" for the months a home office amount covers
+function homeMonthsLabel(ho) {
+  const from = SHORT_MONTHS[ho.firstMonth - 1], to = SHORT_MONTHS[ho.throughMonth - 1];
+  return `${from === to ? from : `${from}&ndash;${to}`} (${ho.months} month${ho.months === 1 ? '' : 's'})`;
+}
+
+// Taxes tab panel: the home office write-off, both methods side by side
+function homeOfficePanel(a) {
+  const ho = a.homeOffice;
+  if (!ho.officeSqft || ho.method === 'none') return '';
+  const head = 'Home office';
+  const form = 'Schedule C line 30';
+  if (!ho.months) {
+    return taxPanel(head, form, taxRow('Home office write-off', 0,
+      { total: true, note: `The office wasn't in use yet by ${SHORT_MONTHS[ho.throughMonth - 1]} ${a.year}` }));
+  }
+  const dep = ho.dep;
+  const limited = ho.carryOperating + ho.carryDepreciation > 0.005;
+  const chosen = ho.method === 'auto' ? 'the larger' : 'your pick';
+  // A Home Office expense on the Accounting tab as well would count twice
+  const homeCat = a.categories.find(c => c.category === 'Home Office');
+  const rows =
+    taxRow('Office share of the house', 0, { text: ho.homeSqft ? `${(ho.pct * 100).toFixed(2)}%` : '&mdash;',
+      note: ho.homeSqft ? `${ho.officeSqft.toLocaleString()} of ${ho.homeSqft.toLocaleString()} sq ft &middot; ${homeMonthsLabel(ho)}`
+        : 'Enter the whole home\'s square feet for the actual-cost method' }) +
+    taxRow('Simplified method', ho.simplified, { note: `$5 &times; ${Math.min(ho.officeSqft, 300).toLocaleString()} sq ft &times; ${ho.months}/12`
+      + (ho.officeSqft > 300 ? ' (300 sq ft at most)' : '') + (ho.simplified < ho.simplifiedRaw ? ' &mdash; limited to the profit' : '') }) +
+    taxRow('Actual costs (Form 8829):', 0, { text: '', sub: true }) +
+    taxRow('Mortgage interest &amp; PMI', ho.mortgageBiz, { note: 'Office share' + (ho.pmiRatio < 1 ? ' &middot; PMI cut back above $100,000 AGI' : '') }) +
+    taxRow('Property tax', ho.taxBiz, { note: 'Office share' }) +
+    taxRow('Insurance, utilities &amp; repairs', ho.operatingBiz, { note: 'Office share' }) +
+    (ho.direct ? taxRow('Office-only costs', ho.direct, { note: 'Counted in full' }) : '') +
+    (ho.priorOperating || ho.priorDepreciation ? taxRow('Carried over from last year', ho.priorOperating + ho.priorDepreciation) : '') +
+    taxRow('Depreciation', dep.amount, { note: dep.missing ? `Enter ${dep.missing} to include it`
+      : `${fmtMoney(dep.basis)} office part of the building &times; ${dep.rate.toFixed(3)}%` }) +
+    (limited ? taxRow('Over the profit limit', ho.carryOperating + ho.carryDepreciation, { minus: true, note: 'Carried to next year' }) : '') +
+    taxRow('Form 8829 total', ho.actual, { sub: true }) +
+    taxRow('Home office write-off', ho.deduction, { total: true,
+      note: (ho.used === 'actual' ? 'Actual costs (Form 8829)' : 'Simplified method') + ` &mdash; ${chosen}` });
+  const notes =
+    (ho.used === 'actual' && dep.amount ? `<p class="pnote">The depreciation (${fmtMoney(dep.amount)}) is taxed back, at up to 25%, when you sell the house.</p>` : '') +
+    (ho.used === 'simplified' && ho.actual > ho.simplified ? `<p class="pnote">Form 8829 would be ${fmtMoney(ho.actual - ho.simplified)} more.</p>` : '') +
+    (ho.throughMonth < 12 ? `<p class="pnote">Amounts entered cover January to ${SHORT_MONTHS[ho.throughMonth - 1]}; the write-off grows as you add the rest of the year.</p>` : '') +
+    (homeCat ? `<p class="pnote warn">You also have ${fmtMoney(homeCat.deductible)} under the Home Office expense category on the Accounting tab. If it's the same write-off, delete it there so it isn't counted twice.</p>` : '');
+  return taxPanel(head, form, rows).replace(/<\/section>$/, notes + '</section>');
+}
+
+// Taxes tab panel: itemized deductions (Schedule A) against the standard one
+function deductionPanel(a) {
+  const t = a.taxes, it = a.itemized;
+  if (!t || !it) return '';
+  const r = TAX_RULES[a.year].itemized;
+  const any = it.medicalPaid || it.saltPaid || it.mortgage || it.charityCash || it.charityGoods;
+  const rows =
+    (it.medicalPaid ? taxRow('Medical &amp; dental', it.medical, { note: `Over 7.5% of AGI: ${fmtMoney(it.medicalPaid)} paid &minus; ${fmtMoney(it.medicalFloor)}` }) : '') +
+    (it.saltPaid ? taxRow('State &amp; local taxes', it.salt, { note: `${fmtMoney(it.saltPaid)} paid` + (it.saltPaid > it.saltCap ? `, capped at ${fmtMoney(it.saltCap)}` : ` (cap ${fmtMoney(it.saltCap)})`)
+      + (it.personal < 1 ? ' &middot; property tax less the office share' : '') }) : '') +
+    (it.mortgage ? taxRow('Mortgage interest &amp; PMI', it.mortgage, { note: (it.personal < 1 ? 'Less the office share' : 'All of it &mdash; the simplified method leaves it here')
+      + (it.pmiRatio < 1 ? ' &middot; PMI cut back above $100,000 AGI' : '') }) : '') +
+    (it.charityCash || it.charityGoods ? taxRow('Charity', it.charity, { note: `${fmtMoney(it.charityCash + it.charityGoods)} given &minus; 0.5% of AGI (${fmtMoney(it.charityFloor)})` }) : '') +
+    (t.sec68 ? taxRow('Top-bracket cut', t.sec68, { minus: true, note: '2/37 in the 37% bracket' }) : '') +
+    taxRow('Itemized total', t.itemizedAllowed, { sub: true, note: any ? '' : 'Nothing entered yet' }) +
+    taxRow('Standard deduction', t.std, { note: FILING_STATUS_NAMES[t.status] }) +
+    taxRow(t.itemizing ? 'Itemize' : 'Take the standard deduction', t.deduction, { total: true,
+      note: `${fmtMoney(Math.abs(t.itemizedAllowed - t.std))} more than ${t.itemizing ? 'the standard deduction' : 'itemizing'}` }) +
+    (t.charityNoItemize ? taxRow('Plus charity without itemizing', t.charityNoItemize, { note: `Cash gifts, up to ${fmtMoney(r.nonItemizerCharity[t.status])}` }) : '');
+  const notes = a.homeOffice.throughMonth < 12 && any
+    ? `<p class="pnote">Amounts cover January to ${SHORT_MONTHS[a.homeOffice.throughMonth - 1]}, but the standard deduction is for the whole year.</p>` : '';
+  return taxPanel('Standard or itemized', 'Schedule A', rows).replace(/<\/section>$/, notes + '</section>');
+}
+
+// Saves the Home Office & Deductions boxes: the home's details (every
+// year) and the selected year's amounts
+function saveHomeInputs() {
+  const year = document.getElementById('acctYear').value;
+  if (!state.accountingYears) state.accountingYears = {};
+  const y = state.accountingYears[year] = { ...(state.accountingYears[year] || {}) };
+  const home = { ...(state.homeOffice || {}) };
+  const homeYear = { ...(y.home || {}) };
+  const itemized = { ...(y.itemized || {}) };
+  // Text pickers keep their value; every other box is a number, 0 if blank
+  const read = el => el.dataset.kind === 'text' ? el.value : Math.max(0, parseFloat(el.value) || 0);
+  document.querySelectorAll('[data-home]').forEach(el => { home[el.dataset.home] = read(el); });
+  document.querySelectorAll('[data-homeyear]').forEach(el => { homeYear[el.dataset.homeyear] = read(el); });
+  document.querySelectorAll('[data-itemized]').forEach(el => { itemized[el.dataset.itemized] = read(el); });
+  state.homeOffice = home;
+  y.home = homeYear;
+  y.itemized = itemized;
+  save(); odAutoSave();
+  renderAccounting();
 }
 
 async function addBusinessExpense() {
@@ -3198,6 +3624,7 @@ function exportAccountingCSV() {
     ['3. AGI'],
     ['Deposits (revenue)', a.revenue.toFixed(2)],
     ['Total deductible expenses', a.deductible.toFixed(2)],
+    ['Home office (Schedule C line 30) - ' + (a.homeOffice.used === 'actual' ? 'actual costs, Form 8829' : a.homeOffice.used === 'simplified' ? 'simplified method' : 'none'), a.homeOffice.deduction.toFixed(2)],
     ['Net profit - business income (Schedule C line 31)', a.netProfit.toFixed(2)],
     ['W-2 wages', a.wages.toFixed(2)],
     ['Other income', a.otherIncome.toFixed(2)],
@@ -3208,7 +3635,10 @@ function exportAccountingCSV() {
     ['4. ESTIMATED TAXES' + (a.taxes ? ' (' + FILING_STATUS_NAMES[a.taxes.status] + ', ' + a.kids + ' children)' : '')],
     ['Self-employment tax', a.seTax.toFixed(2)],
     ...(a.taxes ? [
+      ['Itemized deductions (Schedule A)', a.taxes.itemizedAllowed.toFixed(2)],
       ['Standard deduction', a.taxes.std.toFixed(2)],
+      ['Deduction used - ' + (a.taxes.itemizing ? 'itemized' : 'standard'), a.taxes.deduction.toFixed(2)],
+      ['Charity deduction without itemizing', a.taxes.charityNoItemize.toFixed(2)],
       ['Qualified business income deduction', a.taxes.qbiDeduction.toFixed(2)],
       ['Federal taxable income', a.taxes.fedTaxable.toFixed(2)],
       ['Federal income tax', a.taxes.fedIncomeTax.toFixed(2)],
