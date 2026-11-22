@@ -237,6 +237,17 @@
     }
     .tax-inputs input:focus, .tax-inputs select:focus { outline: none; border-color: var(--accent); }
     .tax-inputs .hint { grid-column: 1 / -1; font-size: 0.76rem; color: var(--muted); margin-top: -6px; }
+    /* Bills & statements: full width under the home costs */
+    .tax-inputs .home-docs { grid-column: 1 / -1; }
+    .home-docs .hint-line { font-size: 0.76rem; color: var(--muted); margin: -4px 0 10px; line-height: 1.45; }
+    .home-doc-add { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; }
+    .home-doc-add label { flex: 1 1 140px; }
+    .home-doc-add input[type="file"] { padding: 5px; font-size: 0.78rem; }
+    .home-doc-table { margin-top: 12px; }
+    .home-doc-table tr.exp-group { cursor: default; }
+    .home-doc-table tr.exp-group:hover td { color: inherit; }
+    .tax-inputs .doc-note { font-size: 0.72rem; color: var(--accent); }
+    .tax-inputs input[readonly], .tax-inputs select:disabled { opacity: 0.75; cursor: not-allowed; }
     /* A bill's amount with the last month it covers under it */
     .tax-inputs .amt-month { display: grid; grid-template-columns: 1fr; gap: 5px; }
     .tax-panel .pnote { font-size: 0.74rem; color: var(--muted); margin: 8px 0 0; line-height: 1.45; }
@@ -1147,6 +1158,11 @@
       <label>Carried over from last year &mdash; depreciation
         <input type="number" data-homeyear="priorDepreciation" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" />
       </label>
+      <!-- Bills & statements: each home bill's documents, uploaded to the
+           OneDrive Receipts/Home folder. A bill with documents takes its
+           total and month from them (see renderHomeDocs / homeYearInputs). -->
+      <div class="group">Bills &amp; statements</div>
+      <div class="home-docs" id="homeDocs"></div>
       <div class="group">Other personal deductions (Schedule A)</div>
       <label>SC income tax paid (withheld or estimated payments)
         <input type="number" data-itemized="stateIncomeTax" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" />
@@ -2538,7 +2554,7 @@ function homeDepreciation(H, yr, throughMonth, pct) {
 function buildHomeOffice(year, profitBeforeHome, agiBeforeHome, itemizing) {
   const R = HOME_OFFICE_RULES;
   const H = state.homeOffice || {};
-  const y = (((state.accountingYears || {})[year] || {}).home) || {};
+  const y = homeYearInputs(year);   // bills with documents use their totals
   // A month saved by the old single "amounts cover January through" picker
   // stands in for any bill without its own month
   const oldMonth = Math.min(12, Math.max(1, parseInt(y.throughMonth, 10) || 12));
@@ -2994,7 +3010,7 @@ function buildItemized(year, agi, ho, status) {
   if (!rules || !rules.itemized) return null;
   const r = rules.itemized;
   const yIn = (state.accountingYears || {})[year] || {};
-  const y = yIn.itemized || {}, h = yIn.home || {};
+  const y = yIn.itemized || {}, h = homeYearInputs(year);
   const n = (o, k) => Math.max(0, parseFloat(o[k]) || 0);
   const base = Math.max(0, agi);
   // What's left of a bill after the office's part (Form 8829 only; each
@@ -3400,8 +3416,10 @@ function renderTaxes(a) {
     el.value = v === undefined || v === '' || v === 0 ? (el.dataset.default || '') : v;
   });
   fillAll('home', state.homeOffice || {});
-  fillAll('homeyear', inputs.home || {});
+  fillAll('homeyear', homeYearInputs(a.year));
   fillAll('itemized', inputs.itemized || {});
+  lockHomeBillsFromDocs(a.year);
+  renderHomeDocs(a.year);
 
   const t = a.taxes;
   const rules = TAX_RULES[a.year];
@@ -3528,7 +3546,7 @@ function homeMonthsLabel(ho) {
 // for the home bills (of `keys`, or all) entered but stopping before
 // December; '' if none do
 function partialBills(year, keys) {
-  const y = (((state.accountingYears || {})[year] || {}).home) || {};
+  const y = homeYearInputs(year);   // bills with documents use their totals
   const top = Math.min(12, Math.max(1, parseInt(y.throughMonth, 10) || 12));
   const byMonth = {};
   HOME_COSTS.filter(c => (!keys || keys.includes(c.key)) && parseFloat(y[c.key]) > 0).forEach(c => {
@@ -3737,6 +3755,189 @@ function formsCard(a) {
       not posted yet, the link opens SCDOR's search for it. Tax software fills these in for you from the same figures.</p>`;
 }
 
+// -- Bills & statements for the home bills -----------------------------------
+// Each home bill (HOME_COSTS) can have its documents uploaded: the bill or
+// statement file goes to the OneDrive Receipts/Home/<year> folder, and the
+// year keeps a small entry for it in accountingYears[year].homeDocs:
+// { id, key (which bill), date (paid), amount, note, receipt {fileName,
+// driveItemId, webUrl} }. A bill with documents takes its total from them
+// (the sum) and its "covers January through" month from the latest one, so
+// the number claimed always matches the paperwork.
+function homeDocsOf(year) {
+  return (((state.accountingYears || {})[year] || {}).homeDocs) || [];
+}
+
+// The year's home bill inputs as the tax figures use them: what was typed,
+// with each bill that has documents replaced by their total and month
+function homeYearInputs(year) {
+  const y = (((state.accountingYears || {})[year] || {}).home) || {};
+  const docs = homeDocsOf(year);
+  if (!docs.length) return y;
+  const out = { ...y };
+  HOME_COSTS.forEach(c => {
+    const mine = docs.filter(d => d.key === c.key);
+    if (!mine.length) return;
+    out[c.key] = Math.round(mine.reduce((t, d) => t + d.amount, 0) * 100) / 100;
+    out[c.key + 'Through'] = Math.max(...mine.map(d => parseInt(d.date.slice(5, 7), 10) || 12));
+  });
+  return out;
+}
+
+// The bill boxes filled from documents are locked, with a note under them
+// saying how many documents the total comes from
+function lockHomeBillsFromDocs(year) {
+  const docs = homeDocsOf(year);
+  HOME_COSTS.forEach(c => {
+    const box = document.querySelector(`[data-homeyear="${c.key}"]`);
+    const month = document.querySelector(`[data-homeyear="${c.key}Through"]`);
+    if (!box || !month) return;
+    const mine = docs.filter(d => d.key === c.key);
+    const label = box.closest('label');
+    let note = label.querySelector('.doc-note');
+    if (mine.length) {
+      box.readOnly = true; month.disabled = true;
+      box.dataset.fromDocs = month.dataset.fromDocs = '1';
+      box.title = month.title = 'Added up from the bills & statements below';
+      if (!note) { note = document.createElement('span'); note.className = 'doc-note'; label.appendChild(note); }
+      note.textContent = `From ${mine.length} document${mine.length === 1 ? '' : 's'} below`;
+    } else {
+      box.readOnly = false; month.disabled = false;
+      delete box.dataset.fromDocs; delete month.dataset.fromDocs;
+      box.title = ''; month.title = 'Last month this amount covers';
+      if (note) note.remove();
+    }
+  });
+}
+
+// The Bills & statements section: an add row, the year's documents listed
+// by bill with each bill's total, and a download of them all
+function renderHomeDocs(year) {
+  const box = document.getElementById('homeDocs');
+  if (!box) return;
+  const docs = homeDocsOf(year);
+  // Keep what's half-typed in the add row across re-renders
+  const keep = id => { const el = document.getElementById(id); return el ? el.value : ''; };
+  const kept = { key: keep('homeDocKey'), date: keep('homeDocDate'), amount: keep('homeDocAmount'), note: keep('homeDocNote') };
+  const rows = HOME_COSTS.map(c => {
+    const mine = docs.filter(d => d.key === c.key).sort((p, q) => p.date.localeCompare(q.date));
+    if (!mine.length) return '';
+    const total = mine.reduce((t, d) => t + d.amount, 0);
+    return `<tr class="exp-group"><td colspan="2">${c.label}<span class="exp-count">${mine.length} document${mine.length === 1 ? '' : 's'}</span></td>
+        <td class="amount" style="text-align:right">${fmtMoney(total)}</td><td colspan="3" class="exp-count">counted through ${SHORT_MONTHS[Math.max(...mine.map(d => parseInt(d.date.slice(5, 7), 10) || 12)) - 1]}</td></tr>`
+      + mine.map(d => `<tr>
+        <td>${fmtDate(d.date)}</td>
+        <td>${escHtml(d.note) || '<span class="exp-count" style="margin-left:0">&mdash;</span>'}</td>
+        <td class="amount" style="text-align:right">${fmtMoney(d.amount)}</td>
+        <td>${d.receipt ? `<div style="display:flex;gap:4px">
+            <a href="${escHtml(d.receipt.webUrl)}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm" title="${escHtml(d.receipt.fileName)}"
+               style="color:var(--accent2);text-decoration:none;white-space:nowrap">&#128206; View</a>
+            <button class="btn btn-ghost btn-sm" onclick="downloadHomeDoc('${d.id}', this)" title="Save ${escHtml(d.receipt.fileName)} to this computer">Download</button></div>` : ''}</td>
+        <td><button class="del-row" onclick="deleteHomeDoc('${d.id}')" title="Remove this document">&times;</button></td>
+      </tr>`).join('');
+  }).join('');
+  box.innerHTML = `
+    <p class="hint-line">Upload each bill or statement for a home bill &mdash; it's saved to your OneDrive (Receipts/Home/${year}) and the
+      bill's box above becomes the total of its documents, counted through the month of the latest one. A yearly statement (e.g. the
+      lender's Form 1098 for mortgage interest) is one document for the whole year. Bills without documents keep the amount you typed.</p>
+    <div class="home-doc-add">
+      <label>Bill <select id="homeDocKey">${HOME_COSTS.map(c => `<option value="${c.key}"${kept.key === c.key ? ' selected' : ''}>${c.label}</option>`).join('')}</select></label>
+      <label>Date paid <input type="date" id="homeDocDate" value="${escHtml(kept.date)}"></label>
+      <label>Amount <input type="number" id="homeDocAmount" min="0" step="0.01" placeholder="0.00" value="${escHtml(kept.amount)}"></label>
+      <label>Note <span class="exp-count" style="margin-left:0">(optional)</span> <input type="text" id="homeDocNote" placeholder="e.g. Form 1098, Oct bill" value="${escHtml(kept.note)}"></label>
+      <label>File <input type="file" id="homeDocFile" accept="image/*,application/pdf"></label>
+      <button class="btn btn-primary btn-sm" onclick="addHomeDoc(this)">+ Add document</button>
+    </div>
+    ${docs.length ? `<div class="table-scroll"><table class="exp-table home-doc-table">
+      <thead><tr><th>Date paid</th><th>Note</th><th style="text-align:right">Amount</th><th>File</th><th></th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+      <div class="export-row" style="margin-top:10px">
+        <button class="btn btn-ghost btn-sm" onclick="downloadAllHomeDocs(this)">Download all ${year} home bills (.zip)</button>
+      </div>` : `<p class="exp-count" style="margin:8px 0 0">No documents uploaded for ${year} yet.</p>`}`;
+}
+
+// Uploads a home bill's file to Receipts/Home/<year>; the OneDrive name
+// starts with the date and id so two files called "bill.pdf" never clash
+async function uploadHomeBillFile(doc, year, file) {
+  const safeName = file.name.replace(/[^A-Za-z0-9._-]/g, '_');
+  const token = await getOdToken();
+  const res = await fetch(
+    `https://graph.microsoft.com/v1.0/me/drive/root:/Apps/Consulting Tracker/Receipts/Home/${year}/${doc.date}-${doc.key}-${doc.id}-${safeName}:/content`,
+    { method: 'PUT', headers: { Authorization: 'Bearer ' + token, 'Content-Type': file.type || 'application/octet-stream' }, body: file }
+  );
+  if (!res.ok) throw new Error(await res.text());
+  const item = await res.json();
+  return { fileName: file.name, driveItemId: item.id, webUrl: item.webUrl };
+}
+
+// "+ Add document": uploads the file first, then saves the entry, so a
+// failed upload never leaves a total with no paperwork behind it
+async function addHomeDoc(btn) {
+  const year = document.getElementById('acctYear').value;
+  const key = document.getElementById('homeDocKey').value;
+  const date = document.getElementById('homeDocDate').value;
+  const amount = parseFloat(document.getElementById('homeDocAmount').value);
+  const note = document.getElementById('homeDocNote').value.trim();
+  const file = document.getElementById('homeDocFile').files[0];
+  if (!date || !date.startsWith(year)) { alert(`Pick the date it was paid, in ${year}. (A bill paid in another year counts in that year.)`); return; }
+  if (!(amount > 0)) { alert('Enter the amount paid.'); return; }
+  if (!file) { alert('Choose the bill or statement file (a PDF or a photo).'); return; }
+  if (!odAccount) { alert('Please sign in to upload documents.'); return; }
+  const doc = { id: uid(), key, date, amount: Math.round(amount * 100) / 100 };
+  if (note) doc.note = note;
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Uploading…';
+  try {
+    doc.receipt = await uploadHomeBillFile(doc, year, file);
+  } catch (err) {
+    alert('Upload failed: ' + err.message + '\n\nNothing was added; try again (a PDF or a smaller photo may help).');
+    btn.disabled = false; btn.textContent = label;
+    return;
+  }
+  if (!state.accountingYears) state.accountingYears = {};
+  const y = state.accountingYears[year] = { ...(state.accountingYears[year] || {}) };
+  y.homeDocs = [...(y.homeDocs || []), doc];
+  save(); odAutoSave();
+  // Clear the add row for the next one (the bill choice stays)
+  ['homeDocDate', 'homeDocAmount', 'homeDocNote', 'homeDocFile'].forEach(id => { document.getElementById(id).value = ''; });
+  renderAccounting();
+}
+
+function deleteHomeDoc(id) {
+  const year = document.getElementById('acctYear').value;
+  const y = (state.accountingYears || {})[year];
+  if (!y || !y.homeDocs) return;
+  if (!confirm('Remove this document? Its bill total goes down by its amount. The file stays in your OneDrive Receipts/Home folder.')) return;
+  y.homeDocs = y.homeDocs.filter(d => d.id !== id);
+  save(); odAutoSave();
+  renderAccounting();
+}
+
+// Saves one document's file to this computer under its original name
+async function downloadHomeDoc(id, btn) {
+  const d = homeDocsOf(document.getElementById('acctYear').value).find(x => x.id === id);
+  if (!d || !d.receipt) return;
+  if (!odAccount) { alert('Please sign in to download the file.'); return; }
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Downloading…';
+  try {
+    saveBlobAs(await fetchReceiptBlob(d.receipt, await getOdToken()), d.receipt.fileName || 'bill');
+  } catch (err) {
+    alert('Download failed: ' + err.message + '\n\nYou can still open it with View and save it from OneDrive.');
+  } finally {
+    btn.disabled = false; btn.textContent = label;
+  }
+}
+
+// All the year's home bill documents in one .zip (with a list of what each
+// file is), through the same zip download as the expense receipts
+function downloadAllHomeDocs(btn) {
+  const year = document.getElementById('acctYear').value;
+  const label = key => (HOME_COSTS.find(c => c.key === key) || {}).label || key;
+  const items = homeDocsOf(year).map(d => ({ date: d.date, receipt: d.receipt, amount: d.amount,
+    category: label(d.key).replace(/&amp;/g, '&'), description: d.note || '' }));
+  return downloadAllReceipts(items, `Home bills ${year}.zip`, btn);
+}
+
 // Saves the Home Office & Deductions boxes: the home's details (every
 // year) and the selected year's amounts
 function saveHomeInputs() {
@@ -3749,7 +3950,9 @@ function saveHomeInputs() {
   // Text pickers keep their value; every other box is a number, 0 if blank
   const read = el => el.dataset.kind === 'text' ? el.value : Math.max(0, parseFloat(el.value) || 0);
   document.querySelectorAll('[data-home]').forEach(el => { home[el.dataset.home] = read(el); });
-  document.querySelectorAll('[data-homeyear]').forEach(el => { homeYear[el.dataset.homeyear] = read(el); });
+  // A bill whose box is filled from its documents is locked; it isn't saved
+  // over the amount you typed before (that comes back if the documents go)
+  document.querySelectorAll('[data-homeyear]').forEach(el => { if (!el.dataset.fromDocs) homeYear[el.dataset.homeyear] = read(el); });
   document.querySelectorAll('[data-itemized]').forEach(el => { itemized[el.dataset.itemized] = read(el); });
   state.homeOffice = home;
   y.home = homeYear;
