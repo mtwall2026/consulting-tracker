@@ -237,6 +237,9 @@
     }
     .tax-inputs input:focus, .tax-inputs select:focus { outline: none; border-color: var(--accent); }
     .tax-inputs .hint { grid-column: 1 / -1; font-size: 0.76rem; color: var(--muted); margin-top: -6px; }
+    /* A bill's amount with the last month it covers beside it */
+    .tax-inputs .amt-month { display: grid; grid-template-columns: 1fr auto; gap: 6px; }
+    .tax-inputs .amt-month select { width: auto; padding: 7px 4px; }
     .tax-panel .pnote { font-size: 0.74rem; color: var(--muted); margin: 8px 0 0; line-height: 1.45; }
     .tax-panel .pnote.warn { color: #fbbf24; }
     /* The worked-out panels */
@@ -1028,7 +1031,7 @@
     <p style="color:var(--muted);font-size:0.82rem;margin:-6px 0 14px">Enter whole-house amounts &mdash; the app works out the office's share and applies the IRS limits. The home's details are kept for every year; the amounts are saved for the selected year.</p>
     <div class="tax-inputs">
       <div class="group">Period &amp; method</div>
-      <label>Amounts below cover January through
+      <label>Simplified method &amp; depreciation count through
         <select data-homeyear="throughMonth" data-default="12" onchange="saveHomeInputs()"><option value="1">January</option><option value="2">February</option><option value="3">March</option><option value="4">April</option><option value="5">May</option><option value="6">June</option><option value="7">July</option><option value="8">August</option><option value="9">September</option><option value="10">October</option><option value="11">November</option><option value="12">December</option></select>
       </label>
       <label>Home office method
@@ -1039,7 +1042,7 @@
           <option value="none">No home office</option>
         </select>
       </label>
-      <div class="hint">Pick the last month your amounts cover &mdash; e.g. August if you've entered January to August so far, December for the whole year. Only the months the office was in use count.</div>
+      <div class="hint">How far into the year to count the office for the simplified method and depreciation &mdash; December for the whole year. Each home bill below has its own month: pick the last month that amount covers (e.g. &ldquo;to Aug&rdquo; for January&ndash;August electricity, &ldquo;to Dec&rdquo; for a full year of mortgage interest). Only the months the office was in use count.</div>
       <div class="group">The home (kept for every year)</div>
       <label>Office square feet
         <input type="number" data-home="officeSqft" min="0" step="1" placeholder="e.g. 150" onchange="saveHomeInputs()" />
@@ -1062,30 +1065,30 @@
       <label>&hellip;of which the building (county improvement value)
         <input type="number" data-home="buildingValue" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" />
       </label>
-      <div class="group">Home costs &mdash; whole house</div>
+      <div class="group">Home costs &mdash; whole house, with the last month each amount covers</div>
       <label>Mortgage interest
-        <input type="number" data-homeyear="mortgageInterest" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" />
+        <span class="amt-month"><input type="number" data-homeyear="mortgageInterest" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" /><select data-homeyear="mortgageInterestThrough" data-fallback="throughMonth" data-default="12" title="Last month this amount covers" aria-label="Covers January through" onchange="saveHomeInputs()"><option value="1">to Jan</option><option value="2">to Feb</option><option value="3">to Mar</option><option value="4">to Apr</option><option value="5">to May</option><option value="6">to Jun</option><option value="7">to Jul</option><option value="8">to Aug</option><option value="9">to Sep</option><option value="10">to Oct</option><option value="11">to Nov</option><option value="12">to Dec</option></select></span>
       </label>
       <label>Mortgage insurance (PMI)
-        <input type="number" data-homeyear="pmi" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" />
+        <span class="amt-month"><input type="number" data-homeyear="pmi" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" /><select data-homeyear="pmiThrough" data-fallback="throughMonth" data-default="12" title="Last month this amount covers" aria-label="Covers January through" onchange="saveHomeInputs()"><option value="1">to Jan</option><option value="2">to Feb</option><option value="3">to Mar</option><option value="4">to Apr</option><option value="5">to May</option><option value="6">to Jun</option><option value="7">to Jul</option><option value="8">to Aug</option><option value="9">to Sep</option><option value="10">to Oct</option><option value="11">to Nov</option><option value="12">to Dec</option></select></span>
       </label>
       <label>Property tax
-        <input type="number" data-homeyear="propertyTax" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" />
+        <span class="amt-month"><input type="number" data-homeyear="propertyTax" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" /><select data-homeyear="propertyTaxThrough" data-fallback="throughMonth" data-default="12" title="Last month this amount covers" aria-label="Covers January through" onchange="saveHomeInputs()"><option value="1">to Jan</option><option value="2">to Feb</option><option value="3">to Mar</option><option value="4">to Apr</option><option value="5">to May</option><option value="6">to Jun</option><option value="7">to Jul</option><option value="8">to Aug</option><option value="9">to Sep</option><option value="10">to Oct</option><option value="11">to Nov</option><option value="12">to Dec</option></select></span>
       </label>
       <label>Homeowners insurance
-        <input type="number" data-homeyear="insurance" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" />
+        <span class="amt-month"><input type="number" data-homeyear="insurance" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" /><select data-homeyear="insuranceThrough" data-fallback="throughMonth" data-default="12" title="Last month this amount covers" aria-label="Covers January through" onchange="saveHomeInputs()"><option value="1">to Jan</option><option value="2">to Feb</option><option value="3">to Mar</option><option value="4">to Apr</option><option value="5">to May</option><option value="6">to Jun</option><option value="7">to Jul</option><option value="8">to Aug</option><option value="9">to Sep</option><option value="10">to Oct</option><option value="11">to Nov</option><option value="12">to Dec</option></select></span>
       </label>
       <label>Electricity
-        <input type="number" data-homeyear="electricity" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" />
+        <span class="amt-month"><input type="number" data-homeyear="electricity" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" /><select data-homeyear="electricityThrough" data-fallback="throughMonth" data-default="12" title="Last month this amount covers" aria-label="Covers January through" onchange="saveHomeInputs()"><option value="1">to Jan</option><option value="2">to Feb</option><option value="3">to Mar</option><option value="4">to Apr</option><option value="5">to May</option><option value="6">to Jun</option><option value="7">to Jul</option><option value="8">to Aug</option><option value="9">to Sep</option><option value="10">to Oct</option><option value="11">to Nov</option><option value="12">to Dec</option></select></span>
       </label>
       <label>Water
-        <input type="number" data-homeyear="water" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" />
+        <span class="amt-month"><input type="number" data-homeyear="water" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" /><select data-homeyear="waterThrough" data-fallback="throughMonth" data-default="12" title="Last month this amount covers" aria-label="Covers January through" onchange="saveHomeInputs()"><option value="1">to Jan</option><option value="2">to Feb</option><option value="3">to Mar</option><option value="4">to Apr</option><option value="5">to May</option><option value="6">to Jun</option><option value="7">to Jul</option><option value="8">to Aug</option><option value="9">to Sep</option><option value="10">to Oct</option><option value="11">to Nov</option><option value="12">to Dec</option></select></span>
       </label>
       <label>Other utilities (gas, sewer, trash)
-        <input type="number" data-homeyear="otherUtilities" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" />
+        <span class="amt-month"><input type="number" data-homeyear="otherUtilities" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" /><select data-homeyear="otherUtilitiesThrough" data-fallback="throughMonth" data-default="12" title="Last month this amount covers" aria-label="Covers January through" onchange="saveHomeInputs()"><option value="1">to Jan</option><option value="2">to Feb</option><option value="3">to Mar</option><option value="4">to Apr</option><option value="5">to May</option><option value="6">to Jun</option><option value="7">to Jul</option><option value="8">to Aug</option><option value="9">to Sep</option><option value="10">to Oct</option><option value="11">to Nov</option><option value="12">to Dec</option></select></span>
       </label>
       <label>Whole-house repairs
-        <input type="number" data-homeyear="repairs" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" />
+        <span class="amt-month"><input type="number" data-homeyear="repairs" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" /><select data-homeyear="repairsThrough" data-fallback="throughMonth" data-default="12" title="Last month this amount covers" aria-label="Covers January through" onchange="saveHomeInputs()"><option value="1">to Jan</option><option value="2">to Feb</option><option value="3">to Mar</option><option value="4">to Apr</option><option value="5">to May</option><option value="6">to Jun</option><option value="7">to Jul</option><option value="8">to Aug</option><option value="9">to Sep</option><option value="10">to Oct</option><option value="11">to Nov</option><option value="12">to Dec</option></select></span>
       </label>
       <label>Office-only costs (e.g. painting the office)
         <input type="number" data-homeyear="direct" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" />
@@ -2406,6 +2409,18 @@ const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'S
 // Depreciation: the office's part of the house is 39-year property - the
 // first year's % depends on the month it was first used for business, then
 // 2.564% a year (Form 8829 line 41 table).
+// The whole-house bills, each with its own "covers January through" month
+// (saved as <key>Through), grouped as Form 8829 lines them up
+const HOME_COSTS = [
+  { key: 'mortgageInterest', label: 'Mortgage interest', group: 'mortgage' },
+  { key: 'pmi', label: 'Mortgage insurance (PMI)', group: 'mortgage' },
+  { key: 'propertyTax', label: 'Property tax', group: 'tax' },
+  { key: 'insurance', label: 'Homeowners insurance', group: 'operating' },
+  { key: 'electricity', label: 'Electricity', group: 'operating' },
+  { key: 'water', label: 'Water', group: 'operating' },
+  { key: 'otherUtilities', label: 'Other utilities', group: 'operating' },
+  { key: 'repairs', label: 'Whole-house repairs', group: 'operating' }
+];
 const HOME_OFFICE_RULES = {
   simplifiedRate: 5, simplifiedMaxSqft: 300,
   firstYearPct: [2.461, 2.247, 2.033, 1.819, 1.605, 1.391, 1.177, 0.963, 0.749, 0.535, 0.321, 0.107],
@@ -2476,26 +2491,40 @@ function buildHomeOffice(year, profitBeforeHome, agiBeforeHome, itemizing) {
   // No start year entered: taken as in use the whole year.
   const firstMonth = !startYear || startYear < yr ? 1 : startYear === yr ? startMonth : 13;
   const months = Math.max(0, throughMonth - firstMonth + 1);
-  const ho = { throughMonth, method, officeSqft, homeSqft, firstMonth, months, pct: 0, share: 0,
-               simplified: 0, simplifiedRaw: 0, actual: 0, deduction: 0, used: 'none' };
-  if (!officeSqft || method === 'none' || !months) return ho;
+  const n = k => Math.max(0, parseFloat(y[k]) || 0);
+  // Each bill covers January to its own month (the top month if none set)
+  const billThrough = k => Math.min(12, Math.max(1, parseInt(y[k + 'Through'], 10) || throughMonth));
+  // Latest month anything entered reaches - the office counts if it was in
+  // use by then
+  const lastMonth = HOME_COSTS.reduce((m, c) => n(c.key) ? Math.max(m, billThrough(c.key)) : m, throughMonth);
+  const ho = { throughMonth, lastMonth, method, officeSqft, homeSqft, firstMonth, months, pct: 0,
+               bills: [], shares: {}, simplified: 0, simplifiedRaw: 0, actual: 0, deduction: 0, used: 'none' };
+  if (!officeSqft || method === 'none' || firstMonth > lastMonth) return ho;
 
   const pct = homeSqft > 0 ? Math.min(1, officeSqft / homeSqft) : 0;
-  // The amounts entered cover January..throughMonth; only the months the
-  // office was in use count toward it
-  const share = pct * months / throughMonth;
   const limit = Math.max(0, profitBeforeHome);
+  const pmiRatio = pmiShare(agiBeforeHome, TAX_RULES[year]);
+  // A bill covering January..its month: the office's share is the office %
+  // times the part of those months the office was in use
+  const bills = HOME_COSTS.map(c => {
+    const through = billThrough(c.key);
+    const used = Math.max(0, through - firstMonth + 1);
+    const share = pct * used / through;
+    const amount = n(c.key);
+    // Only part of PMI counts as mortgage interest above $100,000 of AGI
+    const counted = c.key === 'pmi' ? amount * pmiRatio : amount;
+    return { ...c, amount, through, months: used, share, biz: counted * share };
+  });
+  const groupBiz = g => bills.filter(b => b.group === g).reduce((t, b) => t + b.biz, 0);
 
   // Simplified method
   const simplifiedRaw = R.simplifiedRate * Math.min(officeSqft, R.simplifiedMaxSqft) * months / 12;
   const simplified = Math.min(simplifiedRaw, limit);
 
   // Actual costs (Form 8829)
-  const n = k => Math.max(0, parseFloat(y[k]) || 0);
-  const pmiRatio = pmiShare(agiBeforeHome, TAX_RULES[year]);
-  const mortgageBiz = (n('mortgageInterest') + n('pmi') * pmiRatio) * share;
-  const taxBiz = n('propertyTax') * share;
-  const operatingBiz = (n('insurance') + n('electricity') + n('water') + n('otherUtilities') + n('repairs')) * share;
+  const mortgageBiz = groupBiz('mortgage');
+  const taxBiz = groupBiz('tax');
+  const operatingBiz = groupBiz('operating');
   const direct = n('direct');
   // Itemizing: the office's mortgage interest and property tax are lines
   // 10-11 and always allowed. Standard deduction: they go on lines 16-17
@@ -2513,7 +2542,8 @@ function buildHomeOffice(year, profitBeforeHome, agiBeforeHome, itemizing) {
 
   const used = method === 'auto' ? (actual > simplified ? 'actual' : 'simplified') : method;
   return Object.assign(ho, {
-    pct, share, limit, simplifiedRaw, simplified, pmiRatio, mortgageBiz, taxBiz, operatingBiz, direct,
+    pct, bills, shares: Object.fromEntries(bills.map(b => [b.key, b.share])),
+    limit, simplifiedRaw, simplified, pmiRatio, mortgageBiz, taxBiz, operatingBiz, direct,
     priorOperating: n('priorOperating'), priorDepreciation: n('priorDepreciation'), dep,
     tier1, tier2, tier3, allowed2, allowed3, actual,
     // Not allowed this year (over the profit limit) - carried to next year
@@ -2534,7 +2564,10 @@ function buildItemized(year, agi, ho, status) {
   const y = yIn.itemized || {}, h = yIn.home || {};
   const n = (o, k) => Math.max(0, parseFloat(o[k]) || 0);
   const base = Math.max(0, agi);
-  const personal = 1 - (ho.used === 'actual' ? ho.share : 0);
+  // What's left of a bill after the office's part (Form 8829 only; each
+  // bill's share depends on the months it covers)
+  const personal = k => 1 - (ho.used === 'actual' ? (ho.shares[k] || 0) : 0);
+  const officeShared = ho.used === 'actual' && ['mortgageInterest', 'pmi', 'propertyTax'].some(k => n(h, k) && ho.shares[k]);
   // Medical & dental: only the part over 7.5% of AGI
   const medicalPaid = n(y, 'medical');
   const medicalFloor = r.medicalFloor * base;
@@ -2543,12 +2576,12 @@ function buildItemized(year, agi, ho, status) {
   // property tax + other, up to the cap. The cap drops by 30% of AGI over
   // $505,000, but not below $10,000.
   const saltCap = Math.max(r.saltFloor, r.saltCap - r.saltPhaseRate * Math.max(0, agi - r.saltPhaseStart));
-  const saltPaid = n(y, 'stateIncomeTax') + n(h, 'propertyTax') * personal + n(y, 'carTax') + n(y, 'otherTaxes');
+  const saltPaid = n(y, 'stateIncomeTax') + n(h, 'propertyTax') * personal('propertyTax') + n(y, 'carTax') + n(y, 'otherTaxes');
   const salt = Math.min(saltPaid, saltCap);
   // Mortgage interest + PMI (cut back above $100,000 of AGI). Assumes the
   // loan bought, built or improved the home and is $750,000 or less.
   const pmiRatio = pmiShare(agi, rules);
-  const mortgage = (n(h, 'mortgageInterest') + n(h, 'pmi') * pmiRatio) * personal;
+  const mortgage = n(h, 'mortgageInterest') * personal('mortgageInterest') + n(h, 'pmi') * pmiRatio * personal('pmi');
   // Charity: goods up to 50% of AGI, cash up to 60% less the goods; then
   // only the part over 0.5% of AGI counts (new for 2026)
   const charityCash = n(y, 'charityCash'), charityGoods = n(y, 'charityGoods');
@@ -2558,7 +2591,7 @@ function buildItemized(year, agi, ho, status) {
   const charity = Math.max(0, cashOk + goodsOk - charityFloor);
   const total = medical + salt + mortgage + charity;
   return { medicalPaid, medicalFloor, medical, saltCap, saltPaid, salt, pmiRatio, mortgage,
-           charityCash, charityGoods, charityFloor, charity, total, personal };
+           charityCash, charityGoods, charityFloor, charity, total, officeShared };
 }
 
 // Tax on taxable income from a bracket table
@@ -2882,7 +2915,9 @@ function renderTaxes(a) {
   // amounts (blank for 0; a picker shows its default when unset)
   const fillAll = (key, src) => document.querySelectorAll(`[data-${key}]`).forEach(el => {
     if (document.activeElement === el) return;
-    const v = src[el.dataset[key]];
+    let v = src[el.dataset[key]];
+    // A bill's month never saved: show the month it is counted to (the top one)
+    if ((v === undefined || v === '' || v === 0) && el.dataset.fallback) v = src[el.dataset.fallback];
     el.value = v === undefined || v === '' || v === 0 ? (el.dataset.default || '') : v;
   });
   fillAll('home', state.homeOffice || {});
@@ -2997,10 +3032,33 @@ function renderTaxes(a) {
     </p>`;
 }
 
-// "Jan-Aug (8 months)" for the months a home office amount covers
+// "Jan-Aug" for months first..last (one name if they're the same)
+function monthSpan(first, last) {
+  const from = SHORT_MONTHS[first - 1], to = SHORT_MONTHS[last - 1];
+  return from === to ? from : `${from}&ndash;${to}`;
+}
+
+// "Jan-Aug (8 months)" for the months the office counts to the top month
 function homeMonthsLabel(ho) {
-  const from = SHORT_MONTHS[ho.firstMonth - 1], to = SHORT_MONTHS[ho.throughMonth - 1];
-  return `${from === to ? from : `${from}&ndash;${to}`} (${ho.months} month${ho.months === 1 ? '' : 's'})`;
+  return `${monthSpan(ho.firstMonth, ho.throughMonth)} (${ho.months} month${ho.months === 1 ? '' : 's'})`;
+}
+
+// "Electricity covers January to Aug" / "Water and PMI cover January to Jul"
+// for the home bills (of `keys`, or all) entered but stopping before
+// December; '' if none do
+function partialBills(year, keys) {
+  const y = (((state.accountingYears || {})[year] || {}).home) || {};
+  const top = Math.min(12, Math.max(1, parseInt(y.throughMonth, 10) || 12));
+  const byMonth = {};
+  HOME_COSTS.filter(c => (!keys || keys.includes(c.key)) && parseFloat(y[c.key]) > 0).forEach(c => {
+    const t = Math.min(12, Math.max(1, parseInt(y[c.key + 'Through'], 10) || top));
+    if (t < 12) (byMonth[t] = byMonth[t] || []).push(c.label);
+  });
+  return Object.keys(byMonth).sort((p, q) => p - q).map(t => {
+    const names = byMonth[t];
+    const list = names.length > 1 ? names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1] : names[0];
+    return `${list} cover${names.length > 1 ? '' : 's'} January to ${SHORT_MONTHS[t - 1]}`;
+  }).join('; ');
 }
 
 // Taxes tab panel: the home office write-off, both methods side by side
@@ -3009,25 +3067,31 @@ function homeOfficePanel(a) {
   if (!ho.officeSqft || ho.method === 'none') return '';
   const head = 'Home office';
   const form = 'Schedule C line 30';
-  if (!ho.months) {
+  if (ho.firstMonth > ho.lastMonth) {
     return taxPanel(head, form, taxRow('Home office write-off', 0,
-      { total: true, note: `The office wasn't in use yet by ${SHORT_MONTHS[ho.throughMonth - 1]} ${a.year}` }));
+      { total: true, note: `The office wasn't in use yet by ${SHORT_MONTHS[ho.lastMonth - 1]} ${a.year}` }));
   }
   const dep = ho.dep;
   const limited = ho.carryOperating + ho.carryDepreciation > 0.005;
   const chosen = ho.method === 'auto' ? 'the larger' : 'your pick';
   // A Home Office expense on the Accounting tab as well would count twice
   const homeCat = a.categories.find(c => c.category === 'Home Office');
+  // One row per bill entered: the office's share of it for the months it
+  // covers that the office was in use
+  const entered = ho.bills.filter(b => b.amount);
+  const billRows = entered.length ? entered.map(b => taxRow(b.label, b.biz, {
+    note: `${(b.share * 100).toFixed(2)}% of ${fmtMoney(b.amount)} paid Jan&ndash;${SHORT_MONTHS[b.through - 1]}`
+      + (b.months < b.through ? ` &middot; office used ${monthSpan(ho.firstMonth, b.through)}` : '')
+      + (b.key === 'pmi' && ho.pmiRatio < 1 ? ' &middot; cut back above $100,000 AGI' : '') })).join('')
+    : taxRow('Home costs', 0, { note: 'None entered yet' });
   const rows =
     taxRow('Office share of the house', 0, { text: ho.homeSqft ? `${(ho.pct * 100).toFixed(2)}%` : '&mdash;',
-      note: ho.homeSqft ? `${ho.officeSqft.toLocaleString()} of ${ho.homeSqft.toLocaleString()} sq ft &middot; ${homeMonthsLabel(ho)}`
+      note: ho.homeSqft ? `${ho.officeSqft.toLocaleString()} of ${ho.homeSqft.toLocaleString()} sq ft &middot; office in use from ${SHORT_MONTHS[ho.firstMonth - 1]}`
         : 'Enter the whole home\'s square feet for the actual-cost method' }) +
-    taxRow('Simplified method', ho.simplified, { note: `$5 &times; ${Math.min(ho.officeSqft, 300).toLocaleString()} sq ft &times; ${ho.months}/12`
+    taxRow('Simplified method', ho.simplified, { note: `$5 &times; ${Math.min(ho.officeSqft, 300).toLocaleString()} sq ft &times; ${ho.months}/12 (${homeMonthsLabel(ho)})`
       + (ho.officeSqft > 300 ? ' (300 sq ft at most)' : '') + (ho.simplified < ho.simplifiedRaw ? ' &mdash; limited to the profit' : '') }) +
     taxRow('Actual costs (Form 8829):', 0, { text: '', sub: true }) +
-    taxRow('Mortgage interest &amp; PMI', ho.mortgageBiz, { note: 'Office share' + (ho.pmiRatio < 1 ? ' &middot; PMI cut back above $100,000 AGI' : '') }) +
-    taxRow('Property tax', ho.taxBiz, { note: 'Office share' }) +
-    taxRow('Insurance, utilities &amp; repairs', ho.operatingBiz, { note: 'Office share' }) +
+    billRows +
     (ho.direct ? taxRow('Office-only costs', ho.direct, { note: 'Counted in full' }) : '') +
     (ho.priorOperating || ho.priorDepreciation ? taxRow('Carried over from last year', ho.priorOperating + ho.priorDepreciation) : '') +
     taxRow('Depreciation', dep.amount, { note: dep.missing ? `Enter ${dep.missing} to include it`
@@ -3039,7 +3103,8 @@ function homeOfficePanel(a) {
   const notes =
     (ho.used === 'actual' && dep.amount ? `<p class="pnote">The depreciation (${fmtMoney(dep.amount)}) is taxed back, at up to 25%, when you sell the house.</p>` : '') +
     (ho.used === 'simplified' && ho.actual > ho.simplified ? `<p class="pnote">Form 8829 would be ${fmtMoney(ho.actual - ho.simplified)} more.</p>` : '') +
-    (ho.throughMonth < 12 ? `<p class="pnote">Amounts entered cover January to ${SHORT_MONTHS[ho.throughMonth - 1]}; the write-off grows as you add the rest of the year.</p>` : '') +
+    (partialBills(a.year) ? `<p class="pnote">${partialBills(a.year)}; the write-off grows as you add the rest of the year.</p>` : '') +
+    (ho.throughMonth < 12 ? `<p class="pnote">The simplified method and depreciation count to ${SHORT_MONTHS[ho.throughMonth - 1]}.</p>` : '') +
     (homeCat ? `<p class="pnote warn">You also have ${fmtMoney(homeCat.deductible)} under the Home Office expense category on the Accounting tab. If it's the same write-off, delete it there so it isn't counted twice.</p>` : '');
   return taxPanel(head, form, rows).replace(/<\/section>$/, notes + '</section>');
 }
@@ -3053,8 +3118,8 @@ function deductionPanel(a) {
   const rows =
     (it.medicalPaid ? taxRow('Medical &amp; dental', it.medical, { note: `Over 7.5% of AGI: ${fmtMoney(it.medicalPaid)} paid &minus; ${fmtMoney(it.medicalFloor)}` }) : '') +
     (it.saltPaid ? taxRow('State &amp; local taxes', it.salt, { note: `${fmtMoney(it.saltPaid)} paid` + (it.saltPaid > it.saltCap ? `, capped at ${fmtMoney(it.saltCap)}` : ` (cap ${fmtMoney(it.saltCap)})`)
-      + (it.personal < 1 ? ' &middot; property tax less the office share' : '') }) : '') +
-    (it.mortgage ? taxRow('Mortgage interest &amp; PMI', it.mortgage, { note: (it.personal < 1 ? 'Less the office share' : 'All of it &mdash; the simplified method leaves it here')
+      + (it.officeShared ? ' &middot; property tax less the office share' : '') }) : '') +
+    (it.mortgage ? taxRow('Mortgage interest &amp; PMI', it.mortgage, { note: (it.officeShared ? 'Less the office share' : 'All of it &mdash; the simplified method leaves it here')
       + (it.pmiRatio < 1 ? ' &middot; PMI cut back above $100,000 AGI' : '') }) : '') +
     (it.charityCash || it.charityGoods ? taxRow('Charity', it.charity, { note: `${fmtMoney(it.charityCash + it.charityGoods)} given &minus; 0.5% of AGI (${fmtMoney(it.charityFloor)})` }) : '') +
     (t.sec68 ? taxRow('Top-bracket cut', t.sec68, { minus: true, note: '2/37 in the 37% bracket' }) : '') +
@@ -3063,8 +3128,9 @@ function deductionPanel(a) {
     taxRow(t.itemizing ? 'Itemize' : 'Take the standard deduction', t.deduction, { total: true,
       note: `${fmtMoney(Math.abs(t.itemizedAllowed - t.std))} more than ${t.itemizing ? 'the standard deduction' : 'itemizing'}` }) +
     (t.charityNoItemize ? taxRow('Plus charity without itemizing', t.charityNoItemize, { note: `Cash gifts, up to ${fmtMoney(r.nonItemizerCharity[t.status])}` }) : '');
-  const notes = a.homeOffice.throughMonth < 12 && any
-    ? `<p class="pnote">Amounts cover January to ${SHORT_MONTHS[a.homeOffice.throughMonth - 1]}, but the standard deduction is for the whole year.</p>` : '';
+  const early = partialBills(a.year, ['mortgageInterest', 'pmi', 'propertyTax']);
+  const notes = early
+    ? `<p class="pnote">${early} &mdash; the standard deduction is for the whole year.</p>` : '';
   return taxPanel('Standard or itemized', 'Schedule A', rows).replace(/<\/section>$/, notes + '</section>');
 }
 
