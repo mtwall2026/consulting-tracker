@@ -599,7 +599,7 @@
       <select id="teamViewPick" onchange="switchTeamView()" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 10px;font-size:0.9rem">
         <option value="">My Data</option>
       </select>
-      <button class="btn btn-ghost btn-sm" onclick="refreshTeamSharedList()">&#8635; Refresh List</button>
+      <button class="btn btn-ghost btn-sm" onclick="refreshTeamSharedList(true)">&#8635; Refresh List</button>
       <span id="teamViewBanner" style="display:none;color:var(--accent2);font-size:0.85rem;font-weight:600">&#128065; Viewing read-only &mdash; no changes here are saved</span>
     </div>
   </div>
@@ -7559,39 +7559,96 @@ function isMobile() {
 // Reads teammates' data live and read-only, but only once a teammate has
 // explicitly shared their own file with the manager via shareMyDataWithManager
 // below — nothing here ever grants access or writes to anyone's OneDrive.
-async function refreshTeamSharedList() {
+// Finding teammates' files: Microsoft stopped the "shared with me" list
+// (drive/sharedWithMe) in November 2026, so teammates' files are found
+// with Microsoft Search instead (POST /search/query for driveItems named
+// OD_FILE - it returns files the signed-in account can open, which
+// includes files shared with it). Every file found is remembered in
+// state.teamFiles, so the list no longer depends on a lookup working each
+// time. The old list is still asked, in case it answers.
+// Each entry: { label, driveId, itemId }.
+
+// Every teammate's file has the same filename (each lives in their own
+// drive), so the label is the owner: an email/UPN, else a display name.
+function teamFileLabel(users, fallbackId) {
+  for (var i = 0; i < users.length; i++) { var u = users[i] || {}; if (u.email || u.userPrincipalName) return u.email || u.userPrincipalName; }
+  for (var j = 0; j < users.length; j++) { var v = users[j] || {}; if (v.displayName) return v.displayName; }
+  return 'Shared file (' + String(fallbackId).slice(-6) + ')';
+}
+
+// Microsoft Search: files named OD_FILE in other people's drives
+async function searchTeamFiles(token, myDriveId) {
+  var res = await fetch('https://graph.microsoft.com/v1.0/search/query', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requests: [{ entityTypes: ['driveItem'], query: { queryString: 'filename:"' + OD_FILE + '"' }, from: 0, size: 50 }] })
+  });
+  if (!res.ok) throw new Error('Search: ' + await res.text());
+  var data = await res.json();
+  var hits = [];
+  (data.value || []).forEach(function(v) { (v.hitsContainers || []).forEach(function(c) { (c.hits || []).forEach(function(h) { hits.push(h.resource || {}); }); }); });
+  return hits
+    .filter(function(r) { return r.name === OD_FILE && r.id && r.parentReference && r.parentReference.driveId && r.parentReference.driveId !== myDriveId; })
+    .map(function(r) {
+      return { label: teamFileLabel([r.createdBy && r.createdBy.user, r.lastModifiedBy && r.lastModifiedBy.user], r.id),
+               driveId: r.parentReference.driveId, itemId: r.id };
+    });
+}
+
+// The old "shared with me" list - empty since Microsoft stopped it, but
+// harmless to ask
+async function sharedWithMeTeamFiles(token) {
+  var res = await fetch('https://graph.microsoft.com/v1.0/me/drive/sharedWithMe', { headers: { Authorization: 'Bearer ' + token } });
+  if (!res.ok) return [];
+  var data = await res.json();
+  return (data.value || [])
+    .filter(function(it) { return it.name === OD_FILE && it.remoteItem && it.remoteItem.parentReference; })
+    .map(function(it) {
+      var r = it.remoteItem;
+      return { label: teamFileLabel([r.shared && r.shared.owner && r.shared.owner.user, r.createdBy && r.createdBy.user, r.lastModifiedBy && r.lastModifiedBy.user], it.id),
+               driveId: r.parentReference.driveId, itemId: r.id };
+    });
+}
+
+// Builds the Team View list: remembered files first, then whatever the
+// lookups find (new ones are remembered). `manual`: the Refresh List
+// button, which says what happened instead of failing quietly.
+async function refreshTeamSharedList(manual) {
   if (!isManager()) return;
+  var remembered = (state.teamFiles || []).slice();
+  teamSharedItems = remembered;
+  renderTeamViewPicker();
   try {
     var token = await getOdToken();
     if (!token) return;
-    var res = await fetch('https://graph.microsoft.com/v1.0/me/drive/sharedWithMe', {
-      headers: { Authorization: 'Bearer ' + token }
+    var meRes = await fetch('https://graph.microsoft.com/v1.0/me/drive?$select=id', { headers: { Authorization: 'Bearer ' + token } });
+    var myDriveId = meRes.ok ? (await meRes.json()).id : '';
+    var found = [], problems = [];
+    try { found = found.concat(await searchTeamFiles(token, myDriveId)); } catch (e) { problems.push(e.message); }
+    try { found = found.concat(await sharedWithMeTeamFiles(token)); } catch (e) { /* stopped by Microsoft */ }
+    var added = 0;
+    found.forEach(function(f) {
+      var old = remembered.find(function(x) { return x.itemId === f.itemId && x.driveId === f.driveId; });
+      if (old) { if (/^Shared file/.test(old.label) && !/^Shared file/.test(f.label)) old.label = f.label; return; }
+      remembered.push(f); added++;
     });
-    if (!res.ok) { console.warn('sharedWithMe failed:', await res.text()); return; }
-    var data = await res.json();
-    teamSharedItems = (data.value || [])
-      .filter(function(it) { return it.name === OD_FILE && it.remoteItem; })
-      .map(function(it) {
-        // Every teammate's file has the same filename (each lives in their
-        // own drive), so the filename itself is useless as a label and
-        // ambiguous with more than one teammate sharing. Prefer an actual
-        // email/UPN over a display name over the (non-distinguishing) filename.
-        var owner = (it.remoteItem.shared && it.remoteItem.shared.owner && it.remoteItem.shared.owner.user) || {};
-        var createdBy = (it.remoteItem.createdBy && it.remoteItem.createdBy.user) || {};
-        var modifiedBy = (it.remoteItem.lastModifiedBy && it.remoteItem.lastModifiedBy.user) || {};
-        var label = owner.email || owner.userPrincipalName
-          || createdBy.email || createdBy.userPrincipalName
-          || modifiedBy.email || modifiedBy.userPrincipalName
-          || owner.displayName || createdBy.displayName || modifiedBy.displayName
-          || ('Shared file (' + it.id.slice(-6) + ')');
-        return {
-          label: label,
-          driveId: it.remoteItem.parentReference.driveId,
-          itemId: it.remoteItem.id
-        };
-      });
+    // Remember new files. Only a Refresh List press also writes to
+    // OneDrive: the automatic refresh after sign-in never pushes a save
+    // on its own (if that sign-in's load from OneDrive had failed, it
+    // would write the older copy on this computer over the newer one).
+    if (added) { state.teamFiles = remembered; save(); if (manual) odAutoSave(); }
+    teamSharedItems = remembered;
     renderTeamViewPicker();
-  } catch(e) { console.warn('refreshTeamSharedList error:', e.message); }
+    if (manual) {
+      if (problems.length && !remembered.length) alert('Could not look up shared time logs: ' + problems.join('; '));
+      else if (!remembered.length) alert('No shared time logs found yet. Ask your teammate to press "Share with manager" in their app; '
+        + 'a newly shared file can take a few minutes to show up in Microsoft Search.');
+      else if (added) alert('Found ' + added + ' new shared time log' + (added === 1 ? '' : 's') + '.');
+    }
+  } catch(e) {
+    console.warn('refreshTeamSharedList error:', e.message);
+    if (manual) alert('Could not refresh the list: ' + e.message);
+  }
 }
 
 function renderTeamViewPicker() {
