@@ -268,7 +268,8 @@
     .form-item .flinks a { color: var(--accent); font-size: 0.8rem; text-decoration: none; }
     .form-item .flinks a:hover { text-decoration: underline; }
     /* Business expenses grouped by category: click a heading to open it */
-    .exp-group-tools { display: flex; gap: 6px; justify-content: flex-end; margin-top: 14px; }
+    .exp-group-tools { display: flex; flex-wrap: wrap; gap: 8px 16px; justify-content: space-between; align-items: center; margin-top: 14px; }
+    .exp-view { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 0.8rem; color: var(--muted); }
     .exp-table tr[hidden] { display: none; }
     .exp-table tr.exp-group { cursor: pointer; background: var(--surface2); font-weight: 600; user-select: none; }
     .exp-table tr.exp-group:hover td { color: var(--accent); }
@@ -3262,8 +3263,10 @@ function renderAccounting() {
 
   // 2. Recurring costs, then the expenses grouped by category
   document.getElementById('acctRecurring').innerHTML = recurringCostsHtml(a);
+  const view = expenseView();
+  const grouped = view !== 'list';
   const expenseRow = e => `
-          <tr data-bizexpid="${e.id}" data-expgroup="${escHtml(e.category)}"${expenseGroupOpen(e.category) ? '' : ' hidden'}>
+          <tr data-bizexpid="${e.id}"${grouped ? ` data-expgroup="${escHtml(expenseGroupKey(e))}"${expenseGroupOpen(expenseGroupKey(e)) ? '' : ' hidden'}` : ''}>
             <td>${fmtDate(e.date)}</td>
             <td>${escHtml(e.category)}${e.category === 'Internet' ? ' ' + internetRowNote(e) : ''}${isMileage(e)
               ? ' ' + muted(`(${fmtMiles(e.miles)}${e.roundTrip ? ' round trip' : ''} &times; ${fmtRate(e.mileRate)}/mi)`)
@@ -3278,28 +3281,48 @@ function renderAccounting() {
               <button class="del-row" onclick="deleteBusinessExpense('${e.id}')" title="Delete">&times;</button>
             </td>
           </tr>`;
-  // One heading row per category (largest first, as on the profit list
-  // below); click it to show or hide that category's expenses
-  const groupRows = c => {
-    const items = a.expenses.filter(e => e.category === c.category);
-    const open = expenseGroupOpen(c.category);
-    return `
-          <tr class="exp-group${open ? ' open' : ''}" data-cat="${escHtml(c.category)}" onclick="toggleExpenseGroup(this.dataset.cat)"
-              title="${open ? 'Hide' : 'Show'} these expenses">
-            <td colspan="3"><span class="exp-caret">&#9656;</span>${escHtml(c.category)}
-              <span class="exp-count">${items.length} item${items.length === 1 ? '' : 's'}${c.miles ? ` &middot; ${fmtMiles(c.miles)}` : ''}</span></td>
-            <td class="amount" style="text-align:right">${fmtMoney(c.spent)}</td>
-            <td colspan="2" class="exp-count">${c.deductible !== c.spent ? `${fmtMoney(c.deductible)} deductible` : ''}</td>
-          </tr>${items.map(expenseRow).join('')}`;
+  // Groups for the view: by category (largest first) or by month (newest
+  // first), each with its items, total, deductible part and miles
+  const groups = {};
+  if (grouped) a.expenses.forEach(e => {
+    const key = expenseGroupKey(e);
+    const g = groups[key] || (groups[key] = { key, items: [], spent: 0, deductible: 0, miles: 0 });
+    g.items.push(e);
+    g.spent += e.amount;
+    g.deductible += e.amount * deductiblePct(e);
+    if (isMileage(e)) g.miles += e.miles;
+  });
+  const groupList = Object.values(groups).sort(view === 'month' ? (p, q) => q.key.localeCompare(p.key) : (p, q) => q.spent - p.spent);
+  const groupName = key => {
+    if (view !== 'month') return escHtml(key);
+    const [y, m] = key.split('-').map(Number);
+    return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   };
+  // A heading row per group; click it to show or hide its expenses
+  const groupRows = g => {
+    const open = expenseGroupOpen(g.key);
+    return `
+          <tr class="exp-group${open ? ' open' : ''}" data-cat="${escHtml(g.key)}" onclick="toggleExpenseGroup(this.dataset.cat)"
+              title="${open ? 'Hide' : 'Show'} these expenses">
+            <td colspan="3"><span class="exp-caret">&#9656;</span>${groupName(g.key)}
+              <span class="exp-count">${g.items.length} item${g.items.length === 1 ? '' : 's'}${g.miles ? ` &middot; ${fmtMiles(g.miles)}` : ''}</span></td>
+            <td class="amount" style="text-align:right">${fmtMoney(g.spent)}</td>
+            <td colspan="2" class="exp-count">${Math.abs(g.deductible - g.spent) > 0.005 ? `${fmtMoney(g.deductible)} deductible` : ''}</td>
+          </tr>${g.items.map(expenseRow).join('')}`;
+  };
+  // View switch, plus Expand / Collapse all for the grouped views
+  const viewBtn = (v, label) => `<button class="btn btn-sm ${view === v ? 'btn-primary' : 'btn-ghost'}" onclick="setExpenseView('${v}')"
+    aria-pressed="${view === v}">${label}</button>`;
   document.getElementById('acctExpenseTools').innerHTML = a.expenses.length > 0 ? `
-    <button class="btn btn-ghost btn-sm" onclick="setAllExpenseGroups(true)">Expand all</button>
-    <button class="btn btn-ghost btn-sm" onclick="setAllExpenseGroups(false)">Collapse all</button>` : '';
+    <span class="exp-view">View: ${viewBtn('category', 'By category')}${viewBtn('month', 'By month')}${viewBtn('list', 'List')}</span>
+    ${grouped ? `<span class="exp-view">
+      <button class="btn btn-ghost btn-sm" onclick="setAllExpenseGroups(true)">Expand all</button>
+      <button class="btn btn-ghost btn-sm" onclick="setAllExpenseGroups(false)">Collapse all</button></span>` : ''}` : '';
   document.getElementById('acctExpenses').innerHTML = a.expenses.length ? `
     <table class="exp-table">
       <thead><tr><th>Date</th><th>Category</th><th>Description</th><th style="text-align:right">Amount</th><th>Receipt</th><th></th></tr></thead>
       <tbody>
-        ${[...a.categories].sort((p, q) => q.spent - p.spent).map(groupRows).join('')}
+        ${grouped ? groupList.map(groupRows).join('') : a.expenses.map(expenseRow).join('')}
         <tr class="exp-total"><td colspan="3">Total spent</td><td class="amount" style="text-align:right">${fmtMoney(a.spent)}</td>
           <td colspan="2" class="exp-count">${a.deductible !== a.spent ? `${fmtMoney(a.deductible)} deductible` : ''}</td></tr>
       </tbody>
@@ -3746,25 +3769,45 @@ function openExpenseGroups() {
   }
   return openExpenseGroupsSet;
 }
-function expenseGroupOpen(category) { return openExpenseGroups().has(category); }
-function setExpenseGroupOpen(category, open) {
+// The list's view: 'category' (grouped by category), 'month' (grouped by
+// month) or 'list' (one long list, newest first). Also kept per browser.
+function expenseView() {
+  try { const v = localStorage.getItem('ct-expense-view'); if (['category', 'month', 'list'].includes(v)) return v; } catch (e) { /* default */ }
+  return 'category';
+}
+function setExpenseView(view) {
+  try { localStorage.setItem('ct-expense-view', view); } catch (e) { /* not saved - fine */ }
+  renderAccounting();
+}
+// The group an expense sits in for the current view: its category, or its
+// month ("2026-11")
+function expenseGroupKey(e, view = expenseView()) { return view === 'month' ? (e.date || '').slice(0, 7) : e.category; }
+// Open groups are stored per view ("category:Internet", "month:2026-11")
+function expenseGroupOpen(key, view = expenseView()) { return openExpenseGroups().has(`${view}:${key}`); }
+function setExpenseGroupOpen(key, open, view = expenseView()) {
   const set = openExpenseGroups();
-  if (open) set.add(category); else set.delete(category);
+  if (open) set.add(`${view}:${key}`); else set.delete(`${view}:${key}`);
   try { localStorage.setItem('ct-open-expense-groups', JSON.stringify([...set])); } catch (e) { /* not saved - fine */ }
 }
-// Click a category heading: show or hide its rows (no re-render, so an
-// expense being edited elsewhere in the list keeps its typing)
-function toggleExpenseGroup(category) {
-  const open = !expenseGroupOpen(category);
-  setExpenseGroupOpen(category, open);
+// After adding or editing an expense: open its group in both grouped
+// views, so it's in sight whichever view is on
+function showExpenseGroupsOf(e) {
+  setExpenseGroupOpen(expenseGroupKey(e, 'category'), true, 'category');
+  setExpenseGroupOpen(expenseGroupKey(e, 'month'), true, 'month');
+}
+// Click a heading: show or hide its rows (no re-render, so an expense
+// being edited elsewhere in the list keeps its typing)
+function toggleExpenseGroup(key) {
+  const open = !expenseGroupOpen(key);
+  setExpenseGroupOpen(key, open);
   document.querySelectorAll('#acctExpenses tr[data-expgroup]').forEach(tr => {
-    if (tr.dataset.expgroup === category) tr.hidden = !open;
+    if (tr.dataset.expgroup === key) tr.hidden = !open;
   });
   document.querySelectorAll('#acctExpenses tr.exp-group').forEach(tr => {
-    if (tr.dataset.cat === category) { tr.classList.toggle('open', open); tr.title = (open ? 'Hide' : 'Show') + ' these expenses'; }
+    if (tr.dataset.cat === key) { tr.classList.toggle('open', open); tr.title = (open ? 'Hide' : 'Show') + ' these expenses'; }
   });
 }
-// Expand all / Collapse all: every category in this year's list
+// Expand all / Collapse all: every group in this year's list
 function setAllExpenseGroups(open) {
   document.querySelectorAll('#acctExpenses tr.exp-group').forEach(tr => {
     if (expenseGroupOpen(tr.dataset.cat) !== open) toggleExpenseGroup(tr.dataset.cat);
@@ -3861,8 +3904,8 @@ async function addBusinessExpense() {
   const frequency = mileage ? 'once' : document.getElementById('bizExpFrequency').value;
   if (frequency !== 'once') expense.frequency = frequency;
   document.getElementById('bizExpFrequency').value = 'once';
-  // Open its category so the new expense shows in the list
-  setExpenseGroupOpen(category, true);
+  // Open its group so the new expense shows in the list
+  showExpenseGroupsOf(expense);
   if (mileage) { expense.miles = miles; expense.mileRate = mileRate; expense.from = from; expense.to = to; expense.roundTrip = roundTrip; }
   state.businessExpenses.unshift(expense);
   document.getElementById('bizExpAmount').value = '';
@@ -4210,7 +4253,7 @@ function saveBusinessExpense(id) {
   // How often: trips are always one-time
   const frequency = mileage ? 'once' : document.getElementById('bed-freq').value;
   if (frequency === 'once') delete e.frequency; else e.frequency = frequency;
-  setExpenseGroupOpen(category, true);   // keep it in view if its category changed
+  showExpenseGroupsOf(e);   // keep it in view if its category or date changed
   save(); odAutoSave();
   renderAccounting();
 }
