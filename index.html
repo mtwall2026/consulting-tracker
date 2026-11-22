@@ -1030,10 +1030,7 @@
     <h2>Home Office &amp; Deductions</h2>
     <p style="color:var(--muted);font-size:0.82rem;margin:-6px 0 14px">Enter whole-house amounts &mdash; the app works out the office's share and applies the IRS limits. The home's details are kept for every year; the amounts are saved for the selected year.</p>
     <div class="tax-inputs">
-      <div class="group">Period &amp; method</div>
-      <label>Simplified method &amp; depreciation count through
-        <select data-homeyear="throughMonth" data-default="12" onchange="saveHomeInputs()"><option value="1">January</option><option value="2">February</option><option value="3">March</option><option value="4">April</option><option value="5">May</option><option value="6">June</option><option value="7">July</option><option value="8">August</option><option value="9">September</option><option value="10">October</option><option value="11">November</option><option value="12">December</option></select>
-      </label>
+      <div class="group">Method</div>
       <label>Home office method
         <select data-homeyear="method" data-kind="text" data-default="auto" onchange="saveHomeInputs()">
           <option value="auto">Whichever is larger</option>
@@ -1042,7 +1039,7 @@
           <option value="none">No home office</option>
         </select>
       </label>
-      <div class="hint">How far into the year to count the office for the simplified method and depreciation &mdash; December for the whole year. Each home bill below has its own month: pick the last month that amount covers (e.g. &ldquo;to Aug&rdquo; for January&ndash;August electricity, &ldquo;to Dec&rdquo; for a full year of mortgage interest). Only the months the office was in use count.</div>
+      <div class="hint">Each home bill below has its own month: pick the last month that amount covers (e.g. &ldquo;to Aug&rdquo; for January&ndash;August electricity, &ldquo;to Dec&rdquo; for a full year of mortgage interest). Only the months the office was in use count. Depreciation and the simplified method count to the latest month your bills reach.</div>
       <div class="group">The home (kept for every year)</div>
       <label>Office square feet
         <input type="number" data-home="officeSqft" min="0" step="1" placeholder="e.g. 150" onchange="saveHomeInputs()" />
@@ -2481,8 +2478,10 @@ function buildHomeOffice(year, profitBeforeHome, agiBeforeHome, itemizing) {
   const R = HOME_OFFICE_RULES;
   const H = state.homeOffice || {};
   const y = (((state.accountingYears || {})[year] || {}).home) || {};
-  const throughMonth = Math.min(12, Math.max(1, parseInt(y.throughMonth, 10) || 12));
-  const method = ['auto', 'simplified', 'actual', 'none'].includes(y.method) ? y.method : 'auto';
+  // A month saved by the old single "amounts cover January through" picker
+  // stands in for any bill without its own month
+  const oldMonth = Math.min(12, Math.max(1, parseInt(y.throughMonth, 10) || 12));
+  const method =['auto', 'simplified', 'actual', 'none'].includes(y.method) ? y.method : 'auto';
   const officeSqft = H.officeSqft || 0, homeSqft = H.homeSqft || 0;
   const yr = parseInt(year, 10);
   const startYear = parseInt(H.startYear, 10) || 0;
@@ -2490,13 +2489,16 @@ function buildHomeOffice(year, profitBeforeHome, agiBeforeHome, itemizing) {
   // First month of this year the office was in use (13 = not in use yet).
   // No start year entered: taken as in use the whole year.
   const firstMonth = !startYear || startYear < yr ? 1 : startYear === yr ? startMonth : 13;
-  const months = Math.max(0, throughMonth - firstMonth + 1);
   const n = k => Math.max(0, parseFloat(y[k]) || 0);
-  // Each bill covers January to its own month (the top month if none set)
-  const billThrough = k => Math.min(12, Math.max(1, parseInt(y[k + 'Through'], 10) || throughMonth));
-  // Latest month anything entered reaches - the office counts if it was in
-  // use by then
-  const lastMonth = HOME_COSTS.reduce((m, c) => n(c.key) ? Math.max(m, billThrough(c.key)) : m, throughMonth);
+  // Each bill covers January to its own month
+  const billThrough = k => Math.min(12, Math.max(1, parseInt(y[k + 'Through'], 10) || oldMonth));
+  // The simplified method and depreciation count to the latest month any
+  // bill entered reaches (the whole year when nothing is entered yet); the
+  // office counts if it was in use by then
+  const entered = HOME_COSTS.filter(c => n(c.key));
+  const throughMonth = entered.length ? Math.max(...entered.map(c => billThrough(c.key))) : 12;
+  const lastMonth = throughMonth;
+  const months = Math.max(0, throughMonth - firstMonth + 1);
   const ho = { throughMonth, lastMonth, method, officeSqft, homeSqft, firstMonth, months, pct: 0,
                bills: [], shares: {}, simplified: 0, simplifiedRaw: 0, actual: 0, deduction: 0, used: 'none' };
   if (!officeSqft || method === 'none' || firstMonth > lastMonth) return ho;
@@ -3104,7 +3106,7 @@ function homeOfficePanel(a) {
     (ho.used === 'actual' && dep.amount ? `<p class="pnote">The depreciation (${fmtMoney(dep.amount)}) is taxed back, at up to 25%, when you sell the house.</p>` : '') +
     (ho.used === 'simplified' && ho.actual > ho.simplified ? `<p class="pnote">Form 8829 would be ${fmtMoney(ho.actual - ho.simplified)} more.</p>` : '') +
     (partialBills(a.year) ? `<p class="pnote">${partialBills(a.year)}; the write-off grows as you add the rest of the year.</p>` : '') +
-    (ho.throughMonth < 12 ? `<p class="pnote">The simplified method and depreciation count to ${SHORT_MONTHS[ho.throughMonth - 1]}.</p>` : '') +
+    (ho.throughMonth < 12 ? `<p class="pnote">Depreciation and the simplified method count to ${SHORT_MONTHS[ho.throughMonth - 1]}, the latest month your bills reach.</p>` : '') +
     (homeCat ? `<p class="pnote warn">You also have ${fmtMoney(homeCat.deductible)} under the Home Office expense category on the Accounting tab. If it's the same write-off, delete it there so it isn't counted twice.</p>` : '');
   return taxPanel(head, form, rows).replace(/<\/section>$/, notes + '</section>');
 }
