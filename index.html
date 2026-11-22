@@ -2449,6 +2449,7 @@ function homeDepreciation(H, yr, throughMonth, pct) {
   const landValue = value - building;
   const line37 = Math.min(price, value);
   const line38 = Math.min(price * landValue / value, landValue);
+  out.line37 = line37; out.line38 = line38;
   out.basis = (line37 - line38) * pct;
   const n = yr - startYear;   // 0 = the year the office started
   const first = R.firstYearPct[startMonth - 1];
@@ -2515,7 +2516,9 @@ function buildHomeOffice(year, profitBeforeHome, agiBeforeHome, itemizing) {
     const amount = n(c.key);
     // Only part of PMI counts as mortgage interest above $100,000 of AGI
     const counted = c.key === 'pmi' ? amount * pmiRatio : amount;
-    return { ...c, amount, through, months: used, share, biz: counted * share };
+    // period: the part paid while the office was in use (Form 8829 column
+    // (b) - the form then takes the office % of it)
+    return { ...c, amount, through, months: used, share, biz: counted * share, period: counted * used / through };
   });
   const groupBiz = g => bills.filter(b => b.group === g).reduce((t, b) => t + b.biz, 0);
 
@@ -2547,11 +2550,157 @@ function buildHomeOffice(year, profitBeforeHome, agiBeforeHome, itemizing) {
     pct, bills, shares: Object.fromEntries(bills.map(b => [b.key, b.share])),
     limit, simplifiedRaw, simplified, pmiRatio, mortgageBiz, taxBiz, operatingBiz, direct,
     priorOperating: n('priorOperating'), priorDepreciation: n('priorDepreciation'), dep,
-    tier1, tier2, tier3, allowed2, allowed3, actual,
+    tier1, tier2, tier3, allowed2, allowed3, actual, itemizing: !!itemizing, profit: profitBeforeHome,
     // Not allowed this year (over the profit limit) - carried to next year
     carryOperating: tier2 - allowed2, carryDepreciation: tier3 - allowed3,
     used, deduction: used === 'actual' ? actual : simplified
   });
+}
+
+// -- Form 8829 download ----------------------------------------------------
+// The IRS's own fillable Form 8829 for each year the app has it. A blank
+// copy is kept in forms/ because irs.gov doesn't let other sites fetch it.
+// boxes: form line -> the PDF's box name (f1_NN, in order down the page;
+// two-column lines are (a) direct then (b) indirect). Read off the 2026 PDF.
+const IRS_FORMS = {
+  '2026': {
+    f8829: 'forms/f8829-2026.pdf',
+    boxes: {
+      1: 'f1_03', 2: 'f1_04', 3: 'f1_05', 7: 'f1_09', 8: 'f1_10',
+      '9a': 'f1_11', '9b': 'f1_12', '10a': 'f1_13', '10b': 'f1_14', '11a': 'f1_15', '11b': 'f1_16', '12a': 'f1_17', '12b': 'f1_18',
+      13: 'f1_19', 14: 'f1_20', 15: 'f1_21',
+      '16a': 'f1_22', '16b': 'f1_23', '17a': 'f1_24', '17b': 'f1_25', '18a': 'f1_26', '18b': 'f1_27', '19a': 'f1_28', '19b': 'f1_29',
+      '20a': 'f1_30', '20b': 'f1_31', '21a': 'f1_32', '21b': 'f1_33', '22a': 'f1_34', '22b': 'f1_35', '23a': 'f1_36', '23b': 'f1_37',
+      24: 'f1_38', 25: 'f1_39', 26: 'f1_40', 27: 'f1_41', 28: 'f1_42', 29: 'f1_43', 30: 'f1_44', 31: 'f1_45',
+      32: 'f1_46', 33: 'f1_47', 34: 'f1_48', 35: 'f1_49', 36: 'f1_50',
+      37: 'f1_51', 38: 'f1_52', 39: 'f1_53', 40: 'f1_54', 41: 'f1_55', 42: 'f1_56', 43: 'f1_57', 44: 'f1_58'
+    }
+  }
+};
+
+// Every Form 8829 line from a year's home office figures (buildHomeOffice),
+// worked down the form the way the IRS lays it out. Each line is rounded to
+// cents and the next line is figured from the rounded ones, so the form
+// adds up on its own; line 36 can differ from the app's figure by a cent
+// or two. Lines that don't apply are left out (blank on the form).
+function form8829Lines(ho) {
+  const c = x => Math.round(x * 100) / 100;
+  const period = keys => c(ho.bills.filter(b => keys.includes(b.key)).reduce((t, b) => t + b.period, 0));
+  // Line 7 as a percentage to 4 places, used for the multiplications
+  const pct7 = Math.round(ho.pct * 1e6) / 1e6;
+  const L = { 1: ho.officeSqft, 2: ho.homeSqft, 3: pct7 * 100, 7: pct7 * 100, 8: c(ho.profit) };
+  const mortgage = period(['mortgageInterest', 'pmi']), tax = period(['propertyTax']);
+  // Itemizing: mortgage interest and real estate taxes on lines 10-11 (not
+  // limited by the profit); otherwise lines 16-17 with the running costs
+  if (ho.itemizing) { L['10b'] = mortgage; L['11b'] = tax; }
+  L['12b'] = c((L['10b'] || 0) + (L['11b'] || 0));
+  L[13] = c(L['12b'] * pct7);
+  L[14] = L[13];
+  L[15] = c(Math.max(0, L[8] - L[14]));
+  if (!ho.itemizing) { L['16b'] = mortgage; L['17b'] = tax; }
+  L['18b'] = period(['insurance']);
+  L['20a'] = c(ho.direct);              // office-only costs (e.g. painting it)
+  L['20b'] = period(['repairs']);
+  L['21b'] = period(['electricity', 'water', 'otherUtilities']);
+  L['23a'] = L['20a'];
+  L['23b'] = c(['16b', '17b', '18b', '20b', '21b'].reduce((t, k) => t + (L[k] || 0), 0));
+  L[24] = c(L['23b'] * pct7);
+  L[25] = c(ho.priorOperating || 0);
+  L[26] = c(L['23a'] + L[24] + L[25]);
+  L[27] = Math.min(L[15], L[26]);
+  L[28] = c(L[15] - L[27]);
+  // Part III - depreciation (left blank until the home's values are in)
+  if (ho.dep && !ho.dep.missing) {
+    L[37] = c(ho.dep.line37); L[38] = c(ho.dep.line38);
+    L[39] = c(L[37] - L[38]);
+    L[40] = c(L[39] * pct7);
+    L[41] = Math.round(ho.dep.rate * 1000) / 1000;
+    L[42] = c(L[40] * L[41] / 100);
+  }
+  L[30] = L[42] || 0;
+  L[31] = c(ho.priorDepreciation || 0);
+  L[32] = c(L[30] + L[31]);
+  L[33] = Math.min(L[28], L[32]);
+  L[34] = c(L[14] + L[27] + L[33]);
+  L[36] = L[34];                        // no casualty losses (line 35)
+  // Part IV - carried to next year
+  L[43] = c(Math.max(0, L[26] - L[27]));
+  L[44] = c(Math.max(0, L[32] - L[33]));
+  return L;
+}
+
+// The lines as the text written in the boxes: square feet whole, line 3/7
+// as a percentage to 4 places, line 41 to 3, money with cents. A zero on a
+// line you'd only fill in if it applies is left blank.
+function form8829Text(L) {
+  const shown = new Set(['1', '2', '3', '7', '8', '14', '15', '24', '26', '27', '28', '30', '32', '33', '34', '36', '43', '44']);
+  const money = x => x.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const out = {};
+  Object.entries(L).forEach(([k, v]) => {
+    if (!v && !shown.has(k)) return;
+    out[k] = k === '1' || k === '2' ? Math.round(v).toLocaleString('en-US')
+      : k === '3' || k === '7' ? v.toFixed(4)
+      : k === '41' ? v.toFixed(3) : money(v);
+  });
+  return out;
+}
+
+// Writes the text into the blank IRS form and returns the new PDF's bytes.
+// PDFLib: the pdf-lib library; bytes: the blank form; boxes: line -> box.
+// The XFA copy of the form is dropped so every PDF reader shows the boxes
+// filled in.
+async function fill8829Pdf(PDFLib, bytes, text, boxes) {
+  const doc = await PDFLib.PDFDocument.load(bytes);
+  const form = doc.getForm();
+  const byBox = {};
+  form.getFields().forEach(f => { const m = f.getName().match(/\.(f1_\d+)\[0\]$/); if (m) byBox[m[1]] = f; });
+  Object.entries(text).forEach(([line, value]) => {
+    const field = byBox[boxes[line]];
+    if (!field) throw new Error(`no box for line ${line}`);
+    field.setText(value);
+  });
+  form.deleteXFA();
+  form.updateFieldAppearances();
+  return doc.save();
+}
+
+// pdf-lib is only loaded the first time a form is downloaded
+let pdfLibLoading = null;
+function loadPdfLib() {
+  if (window.PDFLib) return Promise.resolve(window.PDFLib);
+  if (!pdfLibLoading) pdfLibLoading = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js';
+    s.integrity = PDF_LIB_SRI;
+    s.crossOrigin = 'anonymous';
+    s.onload = () => resolve(window.PDFLib);
+    s.onerror = () => { pdfLibLoading = null; reject(new Error('the PDF library could not be loaded')); };
+    document.head.appendChild(s);
+  });
+  return pdfLibLoading;
+}
+// Hash of pdf-lib 1.17.1's file, so a changed copy on the CDN is refused
+const PDF_LIB_SRI = 'sha384-weMABwrltA6jWR8DDe9Jp5blk+tZQh7ugpCsF3JwSA53WZM9/14PjS5LAJNHNjAI';
+
+// "Download Form 8829" on the Taxes tab: the selected year's form filled
+// in with the home office figures. Made in the browser - nothing is sent
+// anywhere. Name and Social Security number are left for you to write in.
+async function downloadForm8829() {
+  const year = document.getElementById('acctYear').value;
+  const irs = IRS_FORMS[year];
+  if (!irs) { alert(`The ${year} Form 8829 isn't in the app yet.`); return; }
+  const ho = buildAccounting(year).homeOffice;
+  if (!ho.bills || !ho.bills.length) { alert('Enter the office and home square feet first.'); return; }
+  try {
+    const [PDFLib, blank] = await Promise.all([
+      loadPdfLib(),
+      fetch(irs.f8829).then(r => { if (!r.ok) throw new Error('the blank form could not be loaded'); return r.arrayBuffer(); })
+    ]);
+    const bytes = await fill8829Pdf(PDFLib, blank, form8829Text(form8829Lines(ho)), irs.boxes);
+    saveBlobAs(new Blob([bytes], { type: 'application/pdf' }), `Form 8829 ${year}.pdf`);
+  } catch (e) {
+    alert('Form 8829 download failed: ' + e.message);
+  }
 }
 
 // -- Itemized deductions (Schedule A) --------------------------------------
@@ -3107,6 +3256,10 @@ function homeOfficePanel(a) {
     (ho.used === 'simplified' && ho.actual > ho.simplified ? `<p class="pnote">Form 8829 would be ${fmtMoney(ho.actual - ho.simplified)} more.</p>` : '') +
     (partialBills(a.year) ? `<p class="pnote">${partialBills(a.year)}; the write-off grows as you add the rest of the year.</p>` : '') +
     (ho.throughMonth < 12 ? `<p class="pnote">Depreciation and the simplified method count to ${SHORT_MONTHS[ho.throughMonth - 1]}, the latest month your bills reach.</p>` : '') +
+    (IRS_FORMS[a.year] ? `<p class="pnote"><button class="btn btn-ghost btn-sm" onclick="downloadForm8829()">Download Form 8829 (PDF)</button><br>`
+      + `The IRS form filled in with these figures &mdash; add your name and Social Security number.`
+      + (ho.used === 'simplified' ? ' The simplified method doesn\'t file it; it\'s for comparing.' : '') + '</p>'
+      : `<p class="pnote">The ${a.year} Form 8829 download will be added once the IRS posts that year's form.</p>`) +
     (homeCat ? `<p class="pnote warn">You also have ${fmtMoney(homeCat.deductible)} under the Home Office expense category on the Accounting tab. If it's the same write-off, delete it there so it isn't counted twice.</p>` : '');
   return taxPanel(head, form, rows).replace(/<\/section>$/, notes + '</section>');
 }
