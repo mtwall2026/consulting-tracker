@@ -3719,12 +3719,39 @@ function filingForms(a) {
           : `On ${a.year}'s figures that's about ${m(fedOwed / 4)} a quarter.`) },
     scItem('SC1040ES', yr + 1, `SC estimated tax for ${yr + 1}`, 'The same quarterly dates for South Carolina.')
   ];
+
+  // Paying contractors: not part of your return, but what the IRS expects
+  // when the business pays someone for their work. The 1099-NEC limit is
+  // $600 for payments through 2025 and $2,000 from 2026 on (P.L. 119-21;
+  // inflation-adjusted from 2027 - update CONTRACTOR_1099_LIMIT then).
+  // notReturn: kept out of the "filled in / not yet" note at the bottom.
+  const limit = yr >= 2026 ? (CONTRACTOR_1099_LIMIT[yr] || CONTRACTOR_1099_LIMIT[2026]) : 600;
+  const contract = a.categories.find(c => c.category === 'Contract Labor');
+  const paid = contract ? contract.spent : 0;
+  const contractors = [
+    { name: 'Form W-9', notReturn: true, title: 'Contractor\'s taxpayer ID', link: IRS_PDF('fw9'),
+      what: 'Have each contractor fill this in <b>before</b> you pay them &mdash; it gives you their legal name and tax ID for the 1099. '
+        + 'Keep it with your records; it isn\'t sent to the IRS.' },
+    { name: 'Form 1099-NEC', notReturn: true, title: 'Payments to contractors', link: IRS_PDF('f1099nec'),
+      linkLabel: 'Form & instructions',
+      extraLink: { href: 'https://www.irs.gov/filing/e-file-information-returns-with-iris', label: 'File free (IRIS)' },
+      what: `For each contractor you paid <b>$${limit.toLocaleString('en-US')} or more</b> in ${a.year}: give them a copy and file it with the IRS by `
+        + `<b>January 31, ${yr + 1}</b> &mdash; free online through the IRS's IRIS system (the printable form can't be filed on paper). `
+        + 'Payments by credit card or PayPal don\'t need one; nor do most corporations. '
+        + (paid ? `Contract Labor paid in ${a.year}: ${m(paid)} in total &mdash; check each contractor's own total.`
+          : `No Contract Labor expenses in ${a.year} yet.`) }
+  ];
   return [
     { head: `Federal &mdash; Form 1040 and what's attached (${a.year})`, items: fed },
     { head: `South Carolina (${a.year})`, items: sc },
+    { head: `Paying contractors (${a.year})`, items: contractors },
     { head: `During ${yr + 1} &mdash; quarterly estimates`, items: est }
   ];
 }
+
+// Form 1099-NEC reporting limit by year of payment (2026 on; $600 before).
+// The IRS adjusts it for inflation from 2027 - add each year as published.
+const CONTRACTOR_1099_LIMIT = { 2026: 2000 };
 
 // The Forms for Your Return card
 function formsCard(a) {
@@ -3734,10 +3761,12 @@ function formsCard(a) {
   const item = f => `<div class="form-item">
       <div class="fname">${f.name}<small>${f.title}</small></div>
       <div class="fwhat">${f.what}</div>
-      <div class="flinks">${canFill(f) ? `<a href="#" onclick="downloadFilledForm('${f.fill}'); return false">Filled in</a>` : ''}<a href="${f.link}" target="_blank" rel="noopener">${f.label || 'Blank form'} &#8599;</a></div>
+      <div class="flinks">${canFill(f) ? `<a href="#" onclick="downloadFilledForm('${f.fill}'); return false">Filled in</a>` : ''}${f.extraLink
+        ? `<a href="${f.extraLink.href}" target="_blank" rel="noopener">${f.extraLink.label} &#8599;</a>` : ''}<a href="${f.link}" target="_blank" rel="noopener">${f.linkLabel || f.label || 'Blank form'} &#8599;</a></div>
     </div>`;
   const groups = filingForms(a);
-  const all = groups.flatMap(g => g.items).filter(f => !/ES$/.test(f.name));   // this year's return, not next year's estimates
+  // This year's return only: not next year's estimates or the contractor forms
+  const all = groups.flatMap(g => g.items).filter(f => !/ES$/.test(f.name) && !f.notReturn);
   const filled = all.filter(canFill).map(f => f.name);
   const notYet = all.filter(f => !canFill(f) && !f.personal).map(f => f.name);
   const personal = all.filter(f => f.personal).map(f => f.name);
