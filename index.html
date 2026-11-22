@@ -267,6 +267,23 @@
     .form-item .flinks { white-space: nowrap; text-align: right; display: flex; gap: 10px; align-items: baseline; }
     .form-item .flinks a { color: var(--accent); font-size: 0.8rem; text-decoration: none; }
     .form-item .flinks a:hover { text-decoration: underline; }
+    /* Business expenses grouped by category: click a heading to open it */
+    .exp-group-tools { display: flex; flex-wrap: wrap; gap: 8px 16px; justify-content: space-between; align-items: center; margin-top: 14px; }
+    .exp-view { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 0.8rem; color: var(--muted); }
+    .exp-table tr[hidden] { display: none; }
+    .exp-table tr.exp-group { cursor: pointer; background: var(--surface2); font-weight: 600; user-select: none; }
+    .exp-table tr.exp-group:hover td { color: var(--accent); }
+    .exp-caret { display: inline-block; width: 1.2em; font-size: 1.05rem; line-height: 1; color: var(--accent); transition: transform 0.15s; }
+    .exp-group.open .exp-caret { transform: rotate(90deg); }
+    .exp-count { font-weight: 400; color: var(--muted); font-size: 0.78rem; margin-left: 6px; }
+    td .exp-count { display: inline; }
+    .recurring td .exp-count { display: block; margin-left: 0; }
+    .exp-total td { font-weight: 700; border-top: 2px solid var(--border); }
+    .freq-badge { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 9px; font-size: 0.7rem;
+      border: 1px solid var(--accent); color: var(--accent); vertical-align: 1px; }
+    .recurring { margin-top: 16px; padding: 12px 14px; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; }
+    .recurring h3 { font-size: 0.92rem; margin: 0 0 8px; }
+    .recurring-note, .recurring-empty { margin: 8px 0 0; font-size: 0.8rem; color: var(--muted); }
     .forms-download { margin-top: 18px; padding: 14px 16px; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; }
     .forms-download p { margin: 8px 0 0; font-size: 0.8rem; color: var(--muted); line-height: 1.45; }
     @media (max-width: 640px) {
@@ -912,6 +929,15 @@
       <label id="bizExpAmountField">Amount
         <input type="number" id="bizExpAmount" placeholder="0.00" min="0" step="0.01" style="width:100px" oninput="updateBizExpFields()" />
       </label>
+      <!-- How often this cost comes round: monthly / yearly ones are listed
+           under Recurring Costs with what they cost over a year -->
+      <label id="bizExpFreqField">How often
+        <select id="bizExpFrequency">
+          <option value="once">One-time</option>
+          <option value="monthly">Monthly</option>
+          <option value="yearly">Yearly</option>
+        </select>
+      </label>
       <!-- Car & Mileage only: where the trip started and went (the mileage
            log), and business miles x the mileage rate is the expense, so
            Amount is hidden and worked out from these. -->
@@ -951,7 +977,10 @@
     <p style="margin:4px 0 0;font-size:0.8rem;color:var(--muted)">Car &amp; Mileage: enter where you drove from and to, the miles and the purpose; the miles count at the IRS mileage rate for the trip's date, filled in for you (2026: $0.725 through June 30, $0.76 from July 1). Leave <b>Round trip</b> ticked to go there and back: enter the one-way miles and they're doubled. For a one-way trip or a day with several stops, untick it and enter the total miles; list the stops in To separated by &rarr; (type "-&gt;" and it becomes &rarr;). Type an address any way (e.g. "123 main st houston tx 77002") and it's tidied into the standard form "123 Main St, Houston, TX 77002" when you leave the box; a name like "Home office" is left as you typed it. The rate covers gas and other running costs, so don't also enter gas for the same car. Parking and tolls can still go in on their own.</p>
     <div id="mileageRateWarning" style="display:none;background:#3a2e12;border:1px solid #b8860b;color:#fbbf24;border-radius:6px;padding:8px 12px;font-size:0.85rem;margin-top:8px"></div>
     <div id="internetRuleWarning" style="display:none;background:#3a2e12;border:1px solid #b8860b;color:#fbbf24;border-radius:6px;padding:8px 12px;font-size:0.85rem;margin-top:8px"></div>
-    <div id="acctExpenses" class="table-scroll" style="margin-top:14px"></div>
+    <div id="acctRecurring"></div>
+    <!-- The year's expenses grouped by category; each group opens and closes -->
+    <div class="exp-group-tools" id="acctExpenseTools"></div>
+    <div id="acctExpenses" class="table-scroll" style="margin-top:8px"></div>
     <div class="export-row" style="margin-top:14px">
       <button class="btn btn-ghost btn-sm" onclick="downloadMileageLog()" title="This year's Car &amp; Mileage trips as a spreadsheet (CSV)">Download Mileage Log</button>
       <button class="btn btn-ghost btn-sm" onclick="downloadAccountingReceipts(this)" title="Every receipt for this year's business expenses, in one .zip">Download All Receipts</button>
@@ -3232,27 +3261,70 @@ function renderAccounting() {
     </table>` : '<p class="empty">No deposits recorded for this year.</p>') +
     (a.unpaid.length ? `<p style="color:var(--muted);font-size:0.8rem;margin:10px 0 0">Not counted yet: ${a.unpaid.length} unpaid invoice${a.unpaid.length === 1 ? '' : 's'} (${fmtMoney(a.unpaidTotal)}). They count in the year they're paid.</p>` : '');
 
-  // 2. Expenses list
-  document.getElementById('acctExpenses').innerHTML = a.expenses.length ? `
-    <table>
-      <thead><tr><th>Date</th><th>Category</th><th>Description</th><th style="text-align:right">Amount</th><th>Receipt</th><th></th></tr></thead>
-      <tbody>
-        ${a.expenses.map(e => `
-          <tr data-bizexpid="${e.id}">
+  // 2. Recurring costs, then the expenses grouped by category
+  document.getElementById('acctRecurring').innerHTML = recurringCostsHtml(a);
+  const view = expenseView();
+  const grouped = view !== 'list';
+  const expenseRow = e => `
+          <tr data-bizexpid="${e.id}"${grouped ? ` data-expgroup="${escHtml(expenseGroupKey(e))}"${expenseGroupOpen(expenseGroupKey(e)) ? '' : ' hidden'}` : ''}>
             <td>${fmtDate(e.date)}</td>
             <td>${escHtml(e.category)}${e.category === 'Internet' ? ' ' + internetRowNote(e) : ''}${isMileage(e)
               ? ' ' + muted(`(${fmtMiles(e.miles)}${e.roundTrip ? ' round trip' : ''} &times; ${fmtRate(e.mileRate)}/mi)`)
                 + (mileageRateOff(e) ? ` <span style="color:#fbbf24;font-size:0.8rem">(IRS rate for this date is ${fmtRate(mileageRateFor(e.date))})</span>` : '') : ''}</td>
             <td>${tripRoute(e)
               ? `${escHtml(tripRoute(e))}${e.description ? `<br>${muted(escHtml(e.description))}` : ''}`
-              : escHtml(e.description) || muted('&mdash;')}</td>
+              : escHtml(e.description) || muted('&mdash;')}${frequencyBadge(e)}</td>
             <td class="amount" style="text-align:right">${fmtMoney(e.amount)}</td>
             <td data-receipt-cell>${receiptCellHtml(e)}</td>
             <td style="display:flex;gap:6px;align-items:center">
               <button class="btn btn-ghost btn-sm" onclick="editBusinessExpense('${e.id}')" title="Edit this expense">Edit</button>
               <button class="del-row" onclick="deleteBusinessExpense('${e.id}')" title="Delete">&times;</button>
             </td>
-          </tr>`).join('')}
+          </tr>`;
+  // Groups for the view: by category (largest first) or by month (newest
+  // first), each with its items, total, deductible part and miles
+  const groups = {};
+  if (grouped) a.expenses.forEach(e => {
+    const key = expenseGroupKey(e);
+    const g = groups[key] || (groups[key] = { key, items: [], spent: 0, deductible: 0, miles: 0 });
+    g.items.push(e);
+    g.spent += e.amount;
+    g.deductible += e.amount * deductiblePct(e);
+    if (isMileage(e)) g.miles += e.miles;
+  });
+  const groupList = Object.values(groups).sort(view === 'month' ? (p, q) => q.key.localeCompare(p.key) : (p, q) => q.spent - p.spent);
+  const groupName = key => {
+    if (view !== 'month') return escHtml(key);
+    const [y, m] = key.split('-').map(Number);
+    return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  };
+  // A heading row per group; click it to show or hide its expenses
+  const groupRows = g => {
+    const open = expenseGroupOpen(g.key);
+    return `
+          <tr class="exp-group${open ? ' open' : ''}" data-cat="${escHtml(g.key)}" onclick="toggleExpenseGroup(this.dataset.cat)"
+              title="${open ? 'Hide' : 'Show'} these expenses">
+            <td colspan="3"><span class="exp-caret">&#9656;</span>${groupName(g.key)}
+              <span class="exp-count">${g.items.length} item${g.items.length === 1 ? '' : 's'}${g.miles ? ` &middot; ${fmtMiles(g.miles)}` : ''}</span></td>
+            <td class="amount" style="text-align:right">${fmtMoney(g.spent)}</td>
+            <td colspan="2" class="exp-count">${Math.abs(g.deductible - g.spent) > 0.005 ? `${fmtMoney(g.deductible)} deductible` : ''}</td>
+          </tr>${g.items.map(expenseRow).join('')}`;
+  };
+  // View switch, plus Expand / Collapse all for the grouped views
+  const viewBtn = (v, label) => `<button class="btn btn-sm ${view === v ? 'btn-primary' : 'btn-ghost'}" onclick="setExpenseView('${v}')"
+    aria-pressed="${view === v}">${label}</button>`;
+  document.getElementById('acctExpenseTools').innerHTML = a.expenses.length > 0 ? `
+    <span class="exp-view">View: ${viewBtn('category', 'By category')}${viewBtn('month', 'By month')}${viewBtn('list', 'List')}</span>
+    ${grouped ? `<span class="exp-view">
+      <button class="btn btn-ghost btn-sm" onclick="setAllExpenseGroups(true)">Expand all</button>
+      <button class="btn btn-ghost btn-sm" onclick="setAllExpenseGroups(false)">Collapse all</button></span>` : ''}` : '';
+  document.getElementById('acctExpenses').innerHTML = a.expenses.length ? `
+    <table class="exp-table">
+      <thead><tr><th>Date</th><th>Category</th><th>Description</th><th style="text-align:right">Amount</th><th>Receipt</th><th></th></tr></thead>
+      <tbody>
+        ${grouped ? groupList.map(groupRows).join('') : a.expenses.map(expenseRow).join('')}
+        <tr class="exp-total"><td colspan="3">Total spent</td><td class="amount" style="text-align:right">${fmtMoney(a.spent)}</td>
+          <td colspan="2" class="exp-count">${a.deductible !== a.spent ? `${fmtMoney(a.deductible)} deductible` : ''}</td></tr>
       </tbody>
     </table>` : '<p class="empty">No business expenses for this year yet.</p>';
 
@@ -3684,6 +3756,118 @@ function saveHomeInputs() {
   renderAccounting();
 }
 
+// -- Expense groups and recurring costs -------------------------------------
+// The expense list is grouped by category; which groups are open is a
+// per-browser convenience, kept in localStorage (all closed if it's empty
+// or can't be read).
+// (Read on first use - the page can draw before this part of the script runs.)
+var openExpenseGroupsSet = null;
+function openExpenseGroups() {
+  if (!openExpenseGroupsSet) {
+    try { openExpenseGroupsSet = new Set(JSON.parse(localStorage.getItem('ct-open-expense-groups') || '[]')); }
+    catch (e) { openExpenseGroupsSet = new Set(); }
+  }
+  return openExpenseGroupsSet;
+}
+// The list's view: 'category' (grouped by category), 'month' (grouped by
+// month) or 'list' (one long list, newest first). Also kept per browser.
+function expenseView() {
+  try { const v = localStorage.getItem('ct-expense-view'); if (['category', 'month', 'list'].includes(v)) return v; } catch (e) { /* default */ }
+  return 'category';
+}
+function setExpenseView(view) {
+  try { localStorage.setItem('ct-expense-view', view); } catch (e) { /* not saved - fine */ }
+  renderAccounting();
+}
+// The group an expense sits in for the current view: its category, or its
+// month ("2026-11")
+function expenseGroupKey(e, view = expenseView()) { return view === 'month' ? (e.date || '').slice(0, 7) : e.category; }
+// Open groups are stored per view ("category:Internet", "month:2026-11")
+function expenseGroupOpen(key, view = expenseView()) { return openExpenseGroups().has(`${view}:${key}`); }
+function setExpenseGroupOpen(key, open, view = expenseView()) {
+  const set = openExpenseGroups();
+  if (open) set.add(`${view}:${key}`); else set.delete(`${view}:${key}`);
+  try { localStorage.setItem('ct-open-expense-groups', JSON.stringify([...set])); } catch (e) { /* not saved - fine */ }
+}
+// After adding or editing an expense: open its group in both grouped
+// views, so it's in sight whichever view is on
+function showExpenseGroupsOf(e) {
+  setExpenseGroupOpen(expenseGroupKey(e, 'category'), true, 'category');
+  setExpenseGroupOpen(expenseGroupKey(e, 'month'), true, 'month');
+}
+// Click a heading: show or hide its rows (no re-render, so an expense
+// being edited elsewhere in the list keeps its typing)
+function toggleExpenseGroup(key) {
+  const open = !expenseGroupOpen(key);
+  setExpenseGroupOpen(key, open);
+  document.querySelectorAll('#acctExpenses tr[data-expgroup]').forEach(tr => {
+    if (tr.dataset.expgroup === key) tr.hidden = !open;
+  });
+  document.querySelectorAll('#acctExpenses tr.exp-group').forEach(tr => {
+    if (tr.dataset.cat === key) { tr.classList.toggle('open', open); tr.title = (open ? 'Hide' : 'Show') + ' these expenses'; }
+  });
+}
+// Expand all / Collapse all: every group in this year's list
+function setAllExpenseGroups(open) {
+  document.querySelectorAll('#acctExpenses tr.exp-group').forEach(tr => {
+    if (expenseGroupOpen(tr.dataset.cat) !== open) toggleExpenseGroup(tr.dataset.cat);
+  });
+}
+
+// How often an expense comes round (expense.frequency): monthly, yearly,
+// or nothing for one-time
+const FREQUENCY_NAMES = { monthly: 'Monthly', yearly: 'Yearly' };
+const FREQUENCY_PER_YEAR = { monthly: 12, yearly: 1 };
+function frequencyBadge(e) {
+  return FREQUENCY_NAMES[e.frequency] ? ` <span class="freq-badge">${FREQUENCY_NAMES[e.frequency]}</span>` : '';
+}
+
+// The year's recurring costs: each one (same category, description and how
+// often) listed once at its latest amount, with what that comes to over a
+// full year and what's been paid so far this year. Largest first.
+function recurringCosts(a) {
+  const items = {};
+  // a.expenses is newest first, so the first one seen is the latest
+  a.expenses.filter(e => FREQUENCY_PER_YEAR[e.frequency]).forEach(e => {
+    const key = [e.category, (e.description || '').trim().toLowerCase(), e.frequency].join('\n');
+    const it = items[key] || (items[key] = { category: e.category, description: (e.description || '').trim(), frequency: e.frequency,
+                                              latest: e.amount, latestDate: e.date, pct: deductiblePct(e), count: 0, paid: 0 });
+    it.count++;
+    it.paid += e.amount;
+  });
+  return Object.values(items)
+    .map(it => ({ ...it, perYear: it.latest * FREQUENCY_PER_YEAR[it.frequency] }))
+    .sort((p, q) => q.perYear - p.perYear);
+}
+function recurringCostsHtml(a) {
+  const list = recurringCosts(a);
+  if (!list.length) return `<p class="recurring-empty">Mark an expense <b>Monthly</b> or <b>Yearly</b> under How often and it's listed here
+    with what it costs over a full year.</p>`;
+  const perYear = list.reduce((t, it) => t + it.perYear, 0);
+  const deductible = list.reduce((t, it) => t + it.perYear * it.pct, 0);
+  const paid = list.reduce((t, it) => t + it.paid, 0);
+  return `<div class="recurring">
+    <h3>Recurring costs</h3>
+    <div class="table-scroll"><table>
+      <thead><tr><th>Cost</th><th>How often</th><th style="text-align:right">Latest</th><th style="text-align:right">Per year</th><th style="text-align:right">Paid in ${a.year}</th></tr></thead>
+      <tbody>
+        ${list.map(it => `<tr>
+          <td>${escHtml(it.description || it.category)}${it.description && it.description.toLowerCase() !== it.category.toLowerCase()
+            ? `<span class="exp-count">${escHtml(it.category)}</span>` : ''}</td>
+          <td>${FREQUENCY_NAMES[it.frequency]}</td>
+          <td class="amount" style="text-align:right">${fmtMoney(it.latest)}<span class="exp-count">${fmtDate(it.latestDate)}</span></td>
+          <td class="amount" style="text-align:right">${fmtMoney(it.perYear)}</td>
+          <td class="amount" style="text-align:right">${fmtMoney(it.paid)}<span class="exp-count">${it.count} payment${it.count === 1 ? '' : 's'}</span></td>
+        </tr>`).join('')}
+        <tr class="exp-total"><td colspan="3">Total per year</td><td class="amount" style="text-align:right">${fmtMoney(perYear)}</td>
+          <td class="amount" style="text-align:right">${fmtMoney(paid)}</td></tr>
+      </tbody>
+    </table></div>
+    <p class="recurring-note">Per year is the latest amount &times; 12 for a monthly cost, &times; 1 for a yearly one.
+      ${Math.abs(deductible - perYear) > 0.005 ? `${fmtMoney(deductible)} of it is deductible (internet at its business-use %, meals at 50%).` : ''}</p>
+  </div>`;
+}
+
 async function addBusinessExpense() {
   const date = document.getElementById('bizExpDate').value;
   const category = document.getElementById('bizExpCategory').value;
@@ -3716,6 +3900,12 @@ async function addBusinessExpense() {
   if (receiptFile && !odAccount) { alert('Please sign in to attach a receipt.'); return; }
   const expense = { id: uid(), date, category, amount, description };
   if (businessPct !== null) expense.businessPct = businessPct;
+  // Monthly / yearly costs are marked; one-time ones carry nothing
+  const frequency = mileage ? 'once' : document.getElementById('bizExpFrequency').value;
+  if (frequency !== 'once') expense.frequency = frequency;
+  document.getElementById('bizExpFrequency').value = 'once';
+  // Open its group so the new expense shows in the list
+  showExpenseGroupsOf(expense);
   if (mileage) { expense.miles = miles; expense.mileRate = mileRate; expense.from = from; expense.to = to; expense.roundTrip = roundTrip; }
   state.businessExpenses.unshift(expense);
   document.getElementById('bizExpAmount').value = '';
@@ -3974,6 +4164,12 @@ function editBusinessExpense(id) {
         <label style="cursor:pointer;font-size:0.8rem" title="Miles are one way and doubled"><input type="checkbox" id="bed-round" ${e.roundTrip ? 'checked' : ''} onchange="toggleBedRoundTrip()"> Round trip</label><br>
         <input type="number" id="bed-miles" value="${isMileage(e) ? (e.roundTrip ? e.miles / 2 : e.miles) : ''}" min="0" step="0.1" placeholder="miles" title="Business miles" oninput="updateBedFields()" style="${st};width:70px;margin-top:4px"> <span id="bed-miles-unit">${e.roundTrip ? 'mi each way' : 'mi'}</span> &times;
         $<input type="number" id="bed-rate" value="${isMileage(e) ? e.mileRate : (mileageRateFor(e.date) || '')}" min="0" step="0.005" title="Rate in dollars per mile" oninput="updateBedFields()" style="${st};width:65px;margin-top:4px">/mi
+      </span>
+      <span id="bed-freq-wrap" style="display:${e.category === MILEAGE_CATEGORY ? 'none' : 'block'}">
+        <select id="bed-freq" title="How often this cost comes round" style="${st};margin-top:4px">
+          ${[['once', 'One-time'], ['monthly', 'Monthly'], ['yearly', 'Yearly']].map(([v, n]) =>
+            `<option value="${v}"${(e.frequency || 'once') === v ? ' selected' : ''}>${n}</option>`).join('')}
+        </select>
       </span></td>
     <td><span id="bed-route-wrap" style="display:${e.category === MILEAGE_CATEGORY ? 'block' : 'none'};margin-bottom:4px;white-space:nowrap">
         <input type="text" id="bed-from" value="${escHtml(e.from || '')}" placeholder="From" title="Where the trip started" autocomplete="off" style="${st};width:150px"> &rarr;
@@ -3997,6 +4193,7 @@ function updateBedFields() {
   document.getElementById('bed-pct-wrap').style.display = category === 'Internet' ? '' : 'none';
   document.getElementById('bed-miles-wrap').style.display = isMiles ? '' : 'none';
   document.getElementById('bed-route-wrap').style.display = isMiles ? 'block' : 'none';
+  document.getElementById('bed-freq-wrap').style.display = isMiles ? 'none' : 'block';
   document.getElementById('bed-desc').placeholder = isMiles ? 'Business purpose' : '';
   const amountInput = document.getElementById('bed-amount');
   amountInput.disabled = isMiles;
@@ -4053,6 +4250,10 @@ function saveBusinessExpense(id) {
   if (businessPct !== null) e.businessPct = businessPct; else delete e.businessPct;
   if (mileage) { e.miles = miles; e.mileRate = mileRate; e.from = from; e.to = to; e.roundTrip = roundTrip; }
   else { delete e.miles; delete e.mileRate; delete e.from; delete e.to; delete e.roundTrip; }
+  // How often: trips are always one-time
+  const frequency = mileage ? 'once' : document.getElementById('bed-freq').value;
+  if (frequency === 'once') delete e.frequency; else e.frequency = frequency;
+  showExpenseGroupsOf(e);   // keep it in view if its category or date changed
   save(); odAutoSave();
   renderAccounting();
 }
@@ -4134,6 +4335,8 @@ function updateBizExpFields() {
   const isMiles = category === MILEAGE_CATEGORY;
   document.getElementById('bizExpPctField').style.display = isInternet ? '' : 'none';
   document.getElementById('bizExpAmountField').style.display = isMiles ? 'none' : '';
+  // A trip happens once, so it has no How often
+  document.getElementById('bizExpFreqField').style.display = isMiles ? 'none' : '';
   document.getElementById('bizExpMilesField').style.display = isMiles ? '' : 'none';
   document.getElementById('bizExpRateField').style.display = isMiles ? '' : 'none';
   document.getElementById('bizExpFromField').style.display = isMiles ? '' : 'none';
@@ -4212,9 +4415,9 @@ function exportAccountingCSV() {
     ['1. REVENUE - DEPOSITS'], ['Date Received', 'Invoice #', 'From', 'Amount ($)']];
   a.deposits.forEach(r => rows.push([invoicePaidDateStr(r), r.invoiceNum, r.clientName, invoiceRecordTotal(r).toFixed(2)]));
   rows.push(['', '', 'Total deposits', a.revenue.toFixed(2)], [],
-    ['2. BUSINESS EXPENSES'], ['Date', 'Category', 'Description', 'Amount ($)', 'Deductible ($)', 'Receipt', 'Miles', 'Rate ($/mi)', 'From', 'To', 'Round trip']);
+    ['2. BUSINESS EXPENSES'], ['Date', 'Category', 'Description', 'Amount ($)', 'Deductible ($)', 'Receipt', 'Miles', 'Rate ($/mi)', 'From', 'To', 'Round trip', 'How often']);
   [...a.expenses].reverse().forEach(e => rows.push([e.date, e.category, e.description || '', e.amount.toFixed(2), (e.amount * deductiblePct(e)).toFixed(2), e.receipt ? e.receipt.fileName : '',
-    isMileage(e) ? e.miles : '', isMileage(e) ? e.mileRate : '', e.from || '', e.to || '', e.roundTrip ? 'Yes' : '']));
+    isMileage(e) ? e.miles : '', isMileage(e) ? e.mileRate : '', e.from || '', e.to || '', e.roundTrip ? 'Yes' : '', FREQUENCY_NAMES[e.frequency] || 'One-time']));
   rows.push(['', '', 'Total', a.spent.toFixed(2), a.deductible.toFixed(2)], [],
     ['3. AGI'],
     ['Deposits (revenue)', a.revenue.toFixed(2)],
