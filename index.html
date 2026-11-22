@@ -1094,10 +1094,13 @@
       <label>Electricity
         <span class="amt-month"><input type="number" data-homeyear="electricity" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" /><select data-homeyear="electricityThrough" data-fallback="throughMonth" data-default="12" title="Last month this amount covers" aria-label="Covers January through" onchange="saveHomeInputs()"><option value="1">to Jan</option><option value="2">to Feb</option><option value="3">to Mar</option><option value="4">to Apr</option><option value="5">to May</option><option value="6">to Jun</option><option value="7">to Jul</option><option value="8">to Aug</option><option value="9">to Sep</option><option value="10">to Oct</option><option value="11">to Nov</option><option value="12">Whole year</option></select></span>
       </label>
-      <label>Water
+      <label>Water &amp; sewer (one bill from the water company)
         <span class="amt-month"><input type="number" data-homeyear="water" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" /><select data-homeyear="waterThrough" data-fallback="throughMonth" data-default="12" title="Last month this amount covers" aria-label="Covers January through" onchange="saveHomeInputs()"><option value="1">to Jan</option><option value="2">to Feb</option><option value="3">to Mar</option><option value="4">to Apr</option><option value="5">to May</option><option value="6">to Jun</option><option value="7">to Jul</option><option value="8">to Aug</option><option value="9">to Sep</option><option value="10">to Oct</option><option value="11">to Nov</option><option value="12">Whole year</option></select></span>
       </label>
-      <label>Other utilities (gas, sewer, trash)
+      <label>Gas
+        <span class="amt-month"><input type="number" data-homeyear="gas" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" /><select data-homeyear="gasThrough" data-fallback="throughMonth" data-default="12" title="Last month this amount covers" aria-label="Covers January through" onchange="saveHomeInputs()"><option value="1">to Jan</option><option value="2">to Feb</option><option value="3">to Mar</option><option value="4">to Apr</option><option value="5">to May</option><option value="6">to Jun</option><option value="7">to Jul</option><option value="8">to Aug</option><option value="9">to Sep</option><option value="10">to Oct</option><option value="11">to Nov</option><option value="12">Whole year</option></select></span>
+      </label>
+      <label>Trash &amp; other utilities (e.g. county landfill fee)
         <span class="amt-month"><input type="number" data-homeyear="otherUtilities" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" /><select data-homeyear="otherUtilitiesThrough" data-fallback="throughMonth" data-default="12" title="Last month this amount covers" aria-label="Covers January through" onchange="saveHomeInputs()"><option value="1">to Jan</option><option value="2">to Feb</option><option value="3">to Mar</option><option value="4">to Apr</option><option value="5">to May</option><option value="6">to Jun</option><option value="7">to Jul</option><option value="8">to Aug</option><option value="9">to Sep</option><option value="10">to Oct</option><option value="11">to Nov</option><option value="12">Whole year</option></select></span>
       </label>
       <label>Whole-house repairs
@@ -2437,8 +2440,9 @@ const HOME_COSTS = [
   { key: 'propertyTax', label: 'Property tax', group: 'tax' },
   { key: 'insurance', label: 'Homeowners insurance', group: 'operating' },
   { key: 'electricity', label: 'Electricity', group: 'operating' },
-  { key: 'water', label: 'Water', group: 'operating' },
-  { key: 'otherUtilities', label: 'Other utilities', group: 'operating' },
+  { key: 'water', label: 'Water &amp; sewer', group: 'operating' },
+  { key: 'gas', label: 'Gas', group: 'operating' },
+  { key: 'otherUtilities', label: 'Trash &amp; other utilities', group: 'operating' },
   { key: 'repairs', label: 'Whole-house repairs', group: 'operating' }
 ];
 const HOME_OFFICE_RULES = {
@@ -2624,7 +2628,7 @@ function form8829Lines(ho) {
   L['18b'] = period(['insurance']);
   L['20a'] = c(ho.direct);              // office-only costs (e.g. painting it)
   L['20b'] = period(['repairs']);
-  L['21b'] = period(['electricity', 'water', 'otherUtilities']);
+  L['21b'] = period(['electricity', 'water', 'gas', 'otherUtilities']);   // all utilities share line 21
   L['23a'] = L['20a'];
   L['23b'] = c(['16b', '17b', '18b', '20b', '21b'].reduce((t, k) => t + (L[k] || 0), 0));
   L[24] = c(L['23b'] * pct7);
