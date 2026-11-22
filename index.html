@@ -255,6 +255,23 @@
     .tax-row .amt { white-space: nowrap; font-variant-numeric: tabular-nums; }
     .tax-row .amt.minus { color: #94a3b8; }
     .tax-row.sub { border-top: 1px solid var(--border); }
+    /* Forms for Your Return: one line per form */
+    .form-group { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+      border-bottom: 1px solid var(--border); padding-bottom: 5px; margin: 16px 0 0; }
+    .form-group:first-child { margin-top: 0; }
+    .form-item { display: grid; grid-template-columns: 150px 1fr auto; gap: 3px 14px; align-items: baseline;
+      padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+    .form-item .fname { font-weight: 600; }
+    .form-item .fname small { display: block; font-weight: 400; color: var(--muted); font-size: 0.72rem; }
+    .form-item .fwhat { color: var(--muted); font-size: 0.8rem; line-height: 1.45; }
+    .form-item .fwhat b { color: var(--text); font-weight: 500; }
+    .form-item .flinks { white-space: nowrap; text-align: right; display: flex; gap: 10px; align-items: baseline; }
+    .form-item .flinks a { color: var(--accent); font-size: 0.8rem; text-decoration: none; }
+    .form-item .flinks a:hover { text-decoration: underline; }
+    @media (max-width: 640px) {
+      .form-item { grid-template-columns: 1fr; }
+      .form-item .flinks { text-align: left; }
+    }
     .tax-row.total { border-bottom: none; border-top: 2px solid var(--border); margin-top: 2px; padding-top: 9px; font-weight: 700; }
     .tax-row.total .amt { color: var(--accent2); }
     /* Bottom line: each tax, the credits, and the result */
@@ -1122,6 +1139,13 @@
   <div class="card">
     <h2>How It's Worked Out</h2>
     <div id="acctTaxes"></div>
+  </div>
+
+  <!-- The forms this year's return needs, with the app's figure for each
+       and a link to the official blank form (see formsCard) -->
+  <div class="card">
+    <h2>Forms for Your Return</h2>
+    <div id="taxForms"></div>
   </div>
 
   </div> <!-- /viewTaxes -->
@@ -3100,6 +3124,7 @@ function renderTaxes(a) {
 
   const hero = document.getElementById('taxHero');
   const box = document.getElementById('acctTaxes');
+  document.getElementById('taxForms').innerHTML = formsCard(a);
   if (!t) {
     // No income-tax rules for this year: only the SE tax can be shown
     hero.innerHTML = `
@@ -3287,6 +3312,107 @@ function deductionPanel(a) {
   const notes = early
     ? `<p class="pnote">${early} &mdash; the standard deduction is for the whole year.</p>` : '';
   return taxPanel('Standard or itemized', 'Schedule A', rows).replace(/<\/section>$/, notes + '</section>');
+}
+
+// -- Forms for Your Return -------------------------------------------------
+// Official blank forms. The IRS address always gives its newest posted
+// version. SCDOR names each year's file and answers "not found" for a year
+// it hasn't posted, so a form not in SCDOR_POSTED links to SCDOR's search
+// for it instead (add each year's forms here as SCDOR posts them).
+const IRS_PDF = f => `https://www.irs.gov/pub/irs-pdf/${f}.pdf`;
+const SCDOR_POSTED = ['SC1040_2025', 'SC1040TC_2025', 'SC1040ES_2025', 'SC1040ES_2026'];
+function scdorForm(name, yr) {
+  if (SCDOR_POSTED.includes(`${name}_${yr}`)) return { link: `https://dor.sc.gov/sites/dor/files/forms/${name}_${yr}.pdf` };
+  // SC1040's plain search also turns up its many schedules; returns only
+  const search = `https://dor.sc.gov/find-a-form?search_api_fulltext=${name}` + (name === 'SC1040' ? '&field_document_type=return' : '');
+  return { link: search, label: 'Find on dor.sc.gov', notYet: ` (The ${yr} version isn't posted yet.)` };
+}
+
+// The forms the selected year's return needs, from its figures: grouped as
+// the federal return (Form 1040 and what's attached), South Carolina, and
+// next year's quarterly estimates. Each: name, title, what goes on it (with
+// the app's figure) and the blank form's link; 8829 also offers the filled
+// one (downloadForm8829).
+function filingForms(a) {
+  const t = a.taxes, ho = a.homeOffice;
+  const yr = parseInt(a.year, 10);
+  const m = x => `<b>${fmtMoney(x)}</b>`;
+  const kids = a.kids ? `List your ${a.kids === 1 ? 'child' : `${a.kids} children`} under Dependents. ` : '';
+  const fed = [
+    { name: 'Form 1040', title: 'Individual income tax return', link: IRS_PDF('f1040'),
+      what: `The return for you and your family &mdash; the business is attached to it, not filed separately. ${kids}`
+        + (t ? (t.total < 0 ? `Estimated refund ${m(-t.total)} (federal and SC together).` : `Estimated tax ${m(t.total)} (federal and SC together).`) : '') },
+    { name: 'Schedule 1', title: 'Additional income and adjustments', link: IRS_PDF('f1040s1'),
+      what: `Business profit on line 3 (${m(a.netProfit)}); the deductible half of self-employment tax on line 15 (${m(a.seTaxHalf)}).` },
+    { name: 'Schedule C', title: 'Profit or loss from business', link: IRS_PDF('f1040sc'),
+      what: `Cirrobound's income and expenses. Home office on line 30 (${m(ho.deduction)}`
+        + (ho.used === 'simplified' && ho.deduction ? ', simplified method &mdash; worked out on Schedule C itself' : '')
+        + `); net profit on line 31 (${m(a.netProfit)}).` }
+  ];
+  if (ho.used === 'actual' && ho.deduction) fed.push({ name: 'Form 8829', title: 'Business use of your home', link: IRS_PDF('f8829'),
+    what: `How the home office write-off (${m(ho.deduction)}) is worked out; line 36 goes on Schedule C line 30.`,
+    extra: IRS_FORMS[a.year] ? '<a href="#" onclick="downloadForm8829(); return false">Filled in</a>' : '' });
+  if (a.seTax || (t && t.addlMedicare)) {
+    fed.push({ name: 'Schedule SE', title: 'Self-employment tax', link: IRS_PDF('f1040sse'),
+      what: `Social Security and Medicare on the business profit: ${m(a.seTax)}.` });
+    fed.push({ name: 'Schedule 2', title: 'Additional taxes', link: IRS_PDF('f1040s2'),
+      what: `Carries the self-employment tax (${m(a.seTax)}) to Form 1040.` });
+  }
+  if (t && t.addlMedicare) fed.push({ name: 'Form 8959', title: 'Additional Medicare tax', link: IRS_PDF('f8959'),
+    what: `0.9% above the threshold: ${m(t.addlMedicare)}.` });
+  if (t && (t.qbiDeduction || t.overQbiThreshold)) fed.push(t.overQbiThreshold
+    ? { name: 'Form 8995-A', title: 'Qualified business income deduction', link: IRS_PDF('f8995a'),
+        what: 'Income is over the simple form\'s limit, so the longer form is used.' }
+    : { name: 'Form 8995', title: 'Qualified business income deduction', link: IRS_PDF('f8995'),
+        what: `Deduction for business income (up to 20% of it, limited by taxable income): ${m(t.qbiDeduction)}.` });
+  if (t && t.itemizing) fed.push({ name: 'Schedule A', title: 'Itemized deductions', link: IRS_PDF('f1040sa'),
+    what: `Itemizing beats the standard deduction: ${m(t.deduction)}.` });
+  if (t && t.ctcFull) fed.push({ name: 'Schedule 8812', title: 'Credits for qualifying children', link: IRS_PDF('f1040s8'),
+    what: `Child tax credit ${m(t.ctcUsed)}` + (t.actc ? ` plus ${m(t.actc)} paid to you (additional child tax credit).` : '.') });
+  if (t && t.eitc) fed.push({ name: 'Schedule EIC', title: 'Earned income credit', link: IRS_PDF('f1040sei'),
+    what: `Lists the children the credit is claimed for: ${m(t.eitc)}.` });
+
+  // An SC form: its link, plus a note when that year's isn't posted yet
+  const scItem = (name, formYr, title, what) => {
+    const f = scdorForm(name, formYr);
+    return { name, title, link: f.link, label: f.label, what: what + (f.notYet || '') };
+  };
+  const sc = [
+    scItem('SC1040', yr, 'South Carolina individual income tax',
+      'Starts from your federal adjusted gross income; asks for the number of dependents and how many are under 6.'
+        + (t ? ` SC tax ${m(t.scAfterCredits)}.` : ''))
+  ];
+  if (t && t.scEitc) sc.push(scItem('SC1040TC', yr, 'SC tax credits', `SC earned income credit, credit code 060: ${m(t.scEitc)}.`));
+
+  // Next year: self-employment income has no withholding, so the tax is
+  // paid in quarterly estimates (federal: needed if you'd owe $1,000+)
+  const fedOwed = t ? a.seTax + t.fedAfterCtc + t.addlMedicare - t.actc - t.eitc : a.seTax;
+  const dates = `due April 15, June 15 and September 15, ${yr + 1}, and January 15, ${yr + 2}`;
+  const est = [
+    { name: 'Form 1040-ES', title: `Estimated tax for ${yr + 1}`, link: IRS_PDF('f1040es'),
+      what: `Quarterly payments ${dates}. Needed if you expect to owe $1,000 or more when you file. `
+        + (fedOwed < 1000 ? `On ${a.year}'s figures you'd owe under $1,000 federal, so they may not be needed &mdash; check again if income goes up.`
+          : `On ${a.year}'s figures that's about ${m(fedOwed / 4)} a quarter.`) },
+    scItem('SC1040ES', yr + 1, `SC estimated tax for ${yr + 1}`, 'The same quarterly dates for South Carolina.')
+  ];
+  return [
+    { head: `Federal &mdash; Form 1040 and what's attached (${a.year})`, items: fed },
+    { head: `South Carolina (${a.year})`, items: sc },
+    { head: `During ${yr + 1} &mdash; quarterly estimates`, items: est }
+  ];
+}
+
+// The Forms for Your Return card
+function formsCard(a) {
+  const item = f => `<div class="form-item">
+      <div class="fname">${f.name}<small>${f.title}</small></div>
+      <div class="fwhat">${f.what}</div>
+      <div class="flinks">${f.extra || ''}<a href="${f.link}" target="_blank" rel="noopener">${f.label || 'Blank form'} &#8599;</a></div>
+    </div>`;
+  return filingForms(a).map(g => `<div class="form-group">${g.head}</div>${g.items.map(item).join('')}`).join('')
+    + `<p class="tax-foot">Only the forms your figures call for are listed. Blank forms open on irs.gov and dor.sc.gov &mdash;
+      the IRS link gives its newest version, so make sure it says ${a.year} at the top when you file; for a South Carolina form
+      not posted yet, the link opens SCDOR's search for it. Tax software fills these in for you from the same figures.</p>`;
 }
 
 // Saves the Home Office & Deductions boxes: the home's details (every
