@@ -279,8 +279,9 @@
     td .exp-count { display: inline; }
     .recurring td .exp-count { display: block; margin-left: 0; }
     .exp-total td { font-weight: 700; border-top: 2px solid var(--border); }
-    .freq-badge { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 9px; font-size: 0.7rem;
-      border: 1px solid var(--accent); color: var(--accent); vertical-align: 1px; }
+    .freq-select { background: var(--surface2); border: 1px solid var(--border); border-radius: 5px; color: var(--muted);
+      padding: 3px 4px; font-size: 0.78rem; }
+    .freq-select.recurring-on { border-color: var(--accent); color: var(--accent); }
     .recurring { margin-top: 16px; padding: 12px 14px; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; }
     .recurring h3 { font-size: 0.92rem; margin: 0 0 8px; }
     .recurring-note, .recurring-empty { margin: 8px 0 0; font-size: 0.8rem; color: var(--muted); }
@@ -3273,8 +3274,9 @@ function renderAccounting() {
                 + (mileageRateOff(e) ? ` <span style="color:#fbbf24;font-size:0.8rem">(IRS rate for this date is ${fmtRate(mileageRateFor(e.date))})</span>` : '') : ''}</td>
             <td>${tripRoute(e)
               ? `${escHtml(tripRoute(e))}${e.description ? `<br>${muted(escHtml(e.description))}` : ''}`
-              : escHtml(e.description) || muted('&mdash;')}${frequencyBadge(e)}</td>
+              : escHtml(e.description) || muted('&mdash;')}</td>
             <td class="amount" style="text-align:right">${fmtMoney(e.amount)}</td>
+            <td>${frequencyCellHtml(e)}</td>
             <td data-receipt-cell>${receiptCellHtml(e)}</td>
             <td style="display:flex;gap:6px;align-items:center">
               <button class="btn btn-ghost btn-sm" onclick="editBusinessExpense('${e.id}')" title="Edit this expense">Edit</button>
@@ -3307,7 +3309,7 @@ function renderAccounting() {
             <td colspan="3"><span class="exp-caret">&#9656;</span>${groupName(g.key)}
               <span class="exp-count">${g.items.length} item${g.items.length === 1 ? '' : 's'}${g.miles ? ` &middot; ${fmtMiles(g.miles)}` : ''}</span></td>
             <td class="amount" style="text-align:right">${fmtMoney(g.spent)}</td>
-            <td colspan="2" class="exp-count">${Math.abs(g.deductible - g.spent) > 0.005 ? `${fmtMoney(g.deductible)} deductible` : ''}</td>
+            <td colspan="3" class="exp-count">${Math.abs(g.deductible - g.spent) > 0.005 ? `${fmtMoney(g.deductible)} deductible` : ''}</td>
           </tr>${g.items.map(expenseRow).join('')}`;
   };
   // View switch, plus Expand / Collapse all for the grouped views
@@ -3320,11 +3322,11 @@ function renderAccounting() {
       <button class="btn btn-ghost btn-sm" onclick="setAllExpenseGroups(false)">Collapse all</button></span>` : ''}` : '';
   document.getElementById('acctExpenses').innerHTML = a.expenses.length ? `
     <table class="exp-table">
-      <thead><tr><th>Date</th><th>Category</th><th>Description</th><th style="text-align:right">Amount</th><th>Receipt</th><th></th></tr></thead>
+      <thead><tr><th>Date</th><th>Category</th><th>Description</th><th style="text-align:right">Amount</th><th>How often</th><th>Receipt</th><th></th></tr></thead>
       <tbody>
         ${grouped ? groupList.map(groupRows).join('') : a.expenses.map(expenseRow).join('')}
         <tr class="exp-total"><td colspan="3">Total spent</td><td class="amount" style="text-align:right">${fmtMoney(a.spent)}</td>
-          <td colspan="2" class="exp-count">${a.deductible !== a.spent ? `${fmtMoney(a.deductible)} deductible` : ''}</td></tr>
+          <td colspan="3" class="exp-count">${a.deductible !== a.spent ? `${fmtMoney(a.deductible)} deductible` : ''}</td></tr>
       </tbody>
     </table>` : '<p class="empty">No business expenses for this year yet.</p>';
 
@@ -3818,8 +3820,32 @@ function setAllExpenseGroups(open) {
 // or nothing for one-time
 const FREQUENCY_NAMES = { monthly: 'Monthly', yearly: 'Yearly' };
 const FREQUENCY_PER_YEAR = { monthly: 12, yearly: 1 };
-function frequencyBadge(e) {
-  return FREQUENCY_NAMES[e.frequency] ? ` <span class="freq-badge">${FREQUENCY_NAMES[e.frequency]}</span>` : '';
+// How often cell on an expense row: a drop-down that saves as soon as it
+// changes (a trip is always one-time, so it just says so)
+function frequencyCellHtml(e) {
+  if (isMileage(e)) return '<span class="exp-count" style="margin-left:0">One-time</span>';
+  return `<select class="freq-select${e.frequency ? ' recurring-on' : ''}" title="How often this cost comes round"
+      onchange="setExpenseFrequency('${e.id}', this.value)">
+    ${[['once', 'One-time'], ['monthly', 'Monthly'], ['yearly', 'Yearly']].map(([v, n]) =>
+      `<option value="${v}"${(e.frequency || 'once') === v ? ' selected' : ''}>${n}</option>`).join('')}
+  </select>`;
+}
+// Changing How often on one expense. If others look like the same cost
+// (same category and description, any year), offer to set them too - so
+// a year of monthly bills is marked in one go.
+function setExpenseFrequency(id, value) {
+  const e = state.businessExpenses.find(x => x.id === id);
+  if (!e || isMileage(e)) return;
+  const same = x => x !== e && !isMileage(x) && x.category === e.category
+    && (x.description || '').trim().toLowerCase() === (e.description || '').trim().toLowerCase();
+  const apply = x => { if (value === 'once') delete x.frequency; else x.frequency = value; };
+  apply(e);
+  const others = state.businessExpenses.filter(x => same(x) && (x.frequency || 'once') !== value);
+  const name = value === 'once' ? 'One-time' : FREQUENCY_NAMES[value];
+  const label = (e.description || '').trim() || e.category;
+  if (others.length && confirm(`Set the other ${others.length} "${label}" expense${others.length === 1 ? '' : 's'} to ${name} too?`)) others.forEach(apply);
+  save(); odAutoSave();
+  renderAccounting();
 }
 
 // The year's recurring costs: each one (same category, description and how
@@ -4164,12 +4190,6 @@ function editBusinessExpense(id) {
         <label style="cursor:pointer;font-size:0.8rem" title="Miles are one way and doubled"><input type="checkbox" id="bed-round" ${e.roundTrip ? 'checked' : ''} onchange="toggleBedRoundTrip()"> Round trip</label><br>
         <input type="number" id="bed-miles" value="${isMileage(e) ? (e.roundTrip ? e.miles / 2 : e.miles) : ''}" min="0" step="0.1" placeholder="miles" title="Business miles" oninput="updateBedFields()" style="${st};width:70px;margin-top:4px"> <span id="bed-miles-unit">${e.roundTrip ? 'mi each way' : 'mi'}</span> &times;
         $<input type="number" id="bed-rate" value="${isMileage(e) ? e.mileRate : (mileageRateFor(e.date) || '')}" min="0" step="0.005" title="Rate in dollars per mile" oninput="updateBedFields()" style="${st};width:65px;margin-top:4px">/mi
-      </span>
-      <span id="bed-freq-wrap" style="display:${e.category === MILEAGE_CATEGORY ? 'none' : 'block'}">
-        <select id="bed-freq" title="How often this cost comes round" style="${st};margin-top:4px">
-          ${[['once', 'One-time'], ['monthly', 'Monthly'], ['yearly', 'Yearly']].map(([v, n]) =>
-            `<option value="${v}"${(e.frequency || 'once') === v ? ' selected' : ''}>${n}</option>`).join('')}
-        </select>
       </span></td>
     <td><span id="bed-route-wrap" style="display:${e.category === MILEAGE_CATEGORY ? 'block' : 'none'};margin-bottom:4px;white-space:nowrap">
         <input type="text" id="bed-from" value="${escHtml(e.from || '')}" placeholder="From" title="Where the trip started" autocomplete="off" style="${st};width:150px"> &rarr;
@@ -4177,6 +4197,12 @@ function editBusinessExpense(id) {
       </span>
       <input type="text" id="bed-desc" value="${escHtml(e.description)}" placeholder="${e.category === MILEAGE_CATEGORY ? 'Business purpose' : ''}" style="${st};width:180px"></td>
     <td><input type="number" id="bed-amount" value="${e.amount}" min="0" step="0.01" style="${st};width:100px" ${e.category === MILEAGE_CATEGORY ? 'disabled title="Worked out from miles x rate"' : ''}></td>
+    <td><span id="bed-freq-wrap" style="display:${e.category === MILEAGE_CATEGORY ? 'none' : 'block'}">
+        <select id="bed-freq" title="How often this cost comes round" style="${st}">
+          ${[['once', 'One-time'], ['monthly', 'Monthly'], ['yearly', 'Yearly']].map(([v, n]) =>
+            `<option value="${v}"${(e.frequency || 'once') === v ? ' selected' : ''}>${n}</option>`).join('')}
+        </select>
+      </span></td>
     <td data-receipt-cell>${receiptCellHtml(e)}</td>
     <td style="display:flex;gap:6px">
       <button class="btn btn-primary btn-sm" onclick="saveBusinessExpense('${id}')">Save</button>
