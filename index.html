@@ -916,6 +916,7 @@
       <div class="filter-row">
         <select id="acctYear" onchange="renderAccounting()"></select>
         <button class="btn btn-ghost btn-sm" onclick="exportAccountingCSV()">Export CSV</button>
+        <button class="btn btn-ghost btn-sm" onclick="downloadAccountingPdf()" title="Profit and loss statement for this year as a PDF - proof of income">Download PDF</button>
       </div>
     </div>
     <div class="summary-grid" id="acctSummary" style="margin-top:14px"></div>
@@ -1039,6 +1040,7 @@
         <!-- Same year as the Accounting tab: changing one changes both -->
         <select id="taxYear" onchange="document.getElementById('acctYear').value = this.value; renderAccounting()"></select>
         <button class="btn btn-ghost btn-sm" onclick="exportAccountingCSV()">Export CSV</button>
+        <button class="btn btn-ghost btn-sm" onclick="downloadAccountingPdf()" title="Profit and loss statement for this year as a PDF - proof of income">Download PDF</button>
       </div>
     </div>
     <div id="taxHero"></div>
@@ -4729,6 +4731,260 @@ function exportAccountingCSV() {
   link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
   link.download = `cirrobound-accounting-${a.year}.csv`;
   link.click();
+}
+
+// -- Profit and Loss PDF ---------------------------------------------------
+// "Download PDF" on the Accounting and Taxes tabs: the selected year's
+// income and expenses as a clean statement to hand to a lender, landlord or
+// accountant as proof of income. Same figures as the CSV and Schedule C:
+// deposits in, deductible expenses and the home office out, and net profit
+// = Schedule C line 31. Made in the browser with pdf-lib; nothing is sent
+// anywhere.
+
+// The PDF's built-in Helvetica only has the Windows-1252 letters. Anything
+// else (emoji, other alphabets) becomes "?" so one odd character in a
+// description can't stop the download. Line breaks and tabs become spaces.
+const PDF_WINANSI_EXTRA = '€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ';
+function pdfSafeText(s) {
+  return Array.from(String(s == null ? '' : s).replace(/[\r\n\t]+/g, ' ')).map(ch => {
+    const c = ch.charCodeAt(0);
+    if ((c >= 0x20 && c < 0x7f) || (c >= 0xa0 && c <= 0xff)) return ch;
+    return PDF_WINANSI_EXTRA.includes(ch) ? ch : '?';
+  }).join('');
+}
+
+// $1,234.56 / -$1,234.56 (never "-$0.00")
+function pdfMoney(n) {
+  const v = Math.round((n || 0) * 100) / 100;
+  return (v < 0 ? '-' : '') + fmtMoney(Math.abs(v));
+}
+
+// Button handler: works out the year, loads pdf-lib and the logo, saves.
+async function downloadAccountingPdf() {
+  const a = buildAccounting(document.getElementById('acctYear').value);
+  try {
+    const PDFLib = await loadPdfLib();
+    // The logo is optional - the statement still downloads without it
+    const bytes = await buildProfitLossPdf(PDFLib, a, await pdfLogoMark(), new Date());
+    saveBlobAs(new Blob([bytes], { type: 'application/pdf' }), `Cirrobound Profit and Loss ${a.year}.pdf`);
+  } catch (e) {
+    alert('PDF download failed: ' + e.message);
+  }
+}
+
+// The logo's mark for the PDF header: logo.png is 1536x1024 with a clear
+// surround (all but faint glow outside pixels 317,259 - 1250,640), so just
+// that part is cut out and shrunk to 372px wide - the whole file would make
+// the PDF about 2.7 MB. PNG bytes, or null if it can't be loaded.
+const PDF_LOGO_CROP = { x: 310, y: 252, w: 948, h: 396 };
+function pdfLogoMark() {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const k = PDF_LOGO_CROP, c = document.createElement('canvas');
+        c.width = 372; c.height = Math.round(372 * k.h / k.w);
+        c.getContext('2d').drawImage(img, k.x, k.y, k.w, k.h, 0, 0, c.width, c.height);
+        c.toBlob(b => b ? b.arrayBuffer().then(resolve, () => resolve(null)) : resolve(null), 'image/png');
+      } catch (e) { resolve(null); }
+    };
+    img.onerror = () => resolve(null);
+    img.src = 'logo.png';
+  });
+}
+
+// Builds the statement from buildAccounting()'s figures. logoBytes: the
+// mark from pdfLogoMark(), or null. Page 1: header,
+// three totals, income by client, expenses by category, net profit. Then
+// every deposit and every expense, one per row. Footer on every page.
+async function buildProfitLossPdf(PDFLib, a, logoBytes, today) {
+  const { PDFDocument, StandardFonts, rgb } = PDFLib;
+  const doc = await PDFDocument.create();
+  doc.setTitle(`Cirrobound Solutions LLC - Profit and Loss ${a.year}`);
+  doc.setAuthor('Cirrobound Solutions LLC');
+  doc.setCreator('Consulting Tracker');
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const hex = h => rgb(parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255);
+  // Cirrobound brand colours
+  const C = { ink: hex('#0A0F2E'), navy: hex('#1E3A8A'), blue: hex('#2563EB'), slate: hex('#475569'),
+              tint: hex('#F0F4FF'), line: hex('#C7D2FE'), hair: hex('#E5E7EB'), green: hex('#16A34A'),
+              red: hex('#DC2626'), white: rgb(1, 1, 1) };
+  // US Letter, 50pt margins; rows stop above the footer
+  const W = 612, H = 792, M = 50, R = W - M, BOTTOM = 72;
+  let page, y;
+  const newPage = () => { page = doc.addPage([W, H]); y = H - M; };
+  const widthOf = (t, f, size) => f.widthOfTextAtSize(t, size);
+  // Cuts text to fit a column, ending in "…"
+  const fit = (t, f, size, max) => {
+    if (widthOf(t, f, size) <= max) return t;
+    while (t && widthOf(t + '…', f, size) > max) t = t.slice(0, -1);
+    return t + '…';
+  };
+  // One line of text at baseline yy; o: { bold, size, color, align: 'right', max }
+  const text = (t, x, yy, o = {}) => {
+    const f = o.bold ? bold : font, size = o.size || 9.5;
+    t = pdfSafeText(t);
+    if (o.max) t = fit(t, f, size, o.max);
+    page.drawText(t, { x: o.align === 'right' ? x - widthOf(t, f, size) : x, y: yy, size, font: f, color: o.color || C.ink });
+  };
+  // Starts a new page when fewer than h points are left
+  const need = h => { if (y - h < BOTTOM) newPage(); };
+  const rule = (yy, color, thickness) => page.drawLine({ start: { x: M, y: yy }, end: { x: R, y: yy }, thickness, color });
+  // Small grey paragraph, wrapped to the page width
+  const para = (t, size = 8.5) => {
+    let line = '';
+    const flush = () => { need(size + 4); text(line, M, y, { size, color: C.slate }); y -= size + 3.5; };
+    pdfSafeText(t).split(' ').forEach(w => {
+      const next = line ? line + ' ' + w : w;
+      if (line && widthOf(next, font, size) > R - M) { flush(); line = w; } else line = next;
+    });
+    if (line) flush();
+  };
+  const heading = t => {
+    need(80);                       // heading + column titles + two rows
+    y -= 8;
+    text(t, M, y, { bold: true, size: 12, color: C.navy });
+    y -= 7; rule(y, C.line, 0.75); y -= 16;
+  };
+  // A table. cols: [{ label, w, align }] (widths add up to R - M).
+  // rows: [{ cells, bold, total }] - total rows get a rule above them.
+  // Column titles repeat on each new page, with "(continued)".
+  const table = (title, cols, rows) => {
+    const ROW = 15;
+    const titles = () => {
+      page.drawRectangle({ x: M, y: y - 4.5, width: R - M, height: ROW, color: C.tint });
+      let x = M;
+      cols.forEach(c => { text(c.label, c.align === 'right' ? x + c.w - 6 : x + 6, y, { bold: true, size: 8.5, color: C.slate, align: c.align }); x += c.w; });
+      y -= ROW;
+    };
+    titles();
+    rows.forEach(r => {
+      if (y - ROW < BOTTOM) {
+        newPage();
+        text(title + ' (continued)', M, y, { bold: true, size: 9, color: C.slate });
+        y -= 16;
+        titles();
+      }
+      if (r.total) rule(y + ROW - 4.5, C.ink, 0.75);
+      let x = M;
+      r.cells.forEach((v, i) => {
+        const c = cols[i];
+        text(v, c.align === 'right' ? x + c.w - 6 : x + 6, y, { bold: r.bold || r.total, size: 9, max: c.w - 12, align: c.align });
+        x += c.w;
+      });
+      if (!r.total) page.drawLine({ start: { x: M, y: y - 4.5 }, end: { x: R, y: y - 4.5 }, thickness: 0.4, color: C.hair });
+      y -= ROW;
+    });
+    y -= 6;
+  };
+
+  const ho = a.homeOffice.deduction || 0;
+  const totalExpenses = a.deductible + ho;
+  const yearNow = String(today.getFullYear()) === String(a.year);
+  const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const longDate = iso => new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+  const period = yearNow ? `January 1 – ${longDate(todayIso)}, ${a.year} (year to date)` : `January 1 – December 31, ${a.year}`;
+
+  // -- Header: logo mark, business name and address; title on the right --
+  newPage();
+  const top = y;
+  let nameX = M;
+  if (logoBytes) {
+    try {
+      const logo = await doc.embedPng(logoBytes);
+      // 92pt wide, top-left at the page margin
+      const h = 92 * logo.height / logo.width;
+      page.drawImage(logo, { x: M, y: top + 8 - h, width: 92, height: h });
+      nameX = M + 92 + 14;
+    } catch (e) { /* no logo - name starts at the margin */ }
+  }
+  text('Cirrobound Solutions LLC', nameX, top - 6, { bold: true, size: 15 });
+  const info = state.businessInfo || {};
+  // Address lines under the name (a line that repeats the name is skipped)
+  const addr = (info.address || '').split('\n').map(l => l.trim())
+    .filter(l => l && !/^cirrobound solutions( llc)?\.?$/i.test(l));
+  if (info.phone) addr.push(info.phone);
+  addr.forEach((l, i) => text(l, nameX, top - 20 - i * 11, { size: 9, color: C.slate, max: 230 }));
+  text('Profit and Loss', R, top - 8, { bold: true, size: 18, color: C.navy, align: 'right' });
+  text(`Tax year ${a.year}  ·  Cash basis`, R, top - 23, { size: 9.5, color: C.slate, align: 'right' });
+  text(period, R, top - 36, { size: 9.5, color: C.slate, align: 'right' });
+  y = top - Math.max(52, 26 + addr.length * 11);
+  page.drawLine({ start: { x: M, y }, end: { x: R, y }, thickness: 2, color: C.blue });
+  y -= 18;
+
+  // -- Three totals --
+  const tileW = (R - M - 24) / 3, tileH = 52;
+  [['INCOME', a.revenue, C.ink], ['EXPENSES', totalExpenses, C.ink],
+   ['NET PROFIT', a.netProfit, a.netProfit < 0 ? C.red : C.green]].forEach(([label, v, color], i) => {
+    const x = M + i * (tileW + 12);
+    page.drawRectangle({ x, y: y - tileH, width: tileW, height: tileH, color: C.tint, borderColor: C.line, borderWidth: 0.75 });
+    text(label, x + 12, y - 17, { bold: true, size: 8, color: C.slate });
+    text(pdfMoney(v), x + 12, y - 39, { bold: true, size: 17, color });
+  });
+  y -= tileH + 14;
+
+  // -- Income, by client --
+  heading('Income');
+  const byClient = {};
+  a.deposits.forEach(r => {
+    const k = r.clientName || 'Other';
+    if (!byClient[k]) byClient[k] = { name: k, count: 0, total: 0 };
+    byClient[k].count++; byClient[k].total += invoiceRecordTotal(r);
+  });
+  const clientRows = Object.values(byClient).sort((p, q) => q.total - p.total)
+    .map(c => ({ cells: [c.name, `${c.count} invoice${c.count === 1 ? '' : 's'} paid`, pdfMoney(c.total)] }));
+  table('Income', [{ label: 'Client', w: 272 }, { label: 'Deposits', w: 120 }, { label: 'Amount', w: 120, align: 'right' }],
+    [...(clientRows.length ? clientRows : [{ cells: ['No deposits recorded', '', pdfMoney(0)] }]),
+     { cells: ['Total income (gross receipts)', '', pdfMoney(a.revenue)], total: true }]);
+
+  // -- Expenses, by category --
+  heading('Expenses');
+  const catRows = a.categories.map(c => ({
+    cells: [c.category + (c.miles ? ` (${c.miles.toLocaleString('en-US')} mi)` : ''), pdfMoney(c.spent), pdfMoney(c.deductible)]
+  }));
+  const homeRows = ho > 0 ? [{ cells: [`Home office (Form 8829${a.homeOffice.used === 'simplified' ? ', simplified method' : ''})`, '', pdfMoney(ho)] }] : [];
+  table('Expenses', [{ label: 'Category', w: 272 }, { label: 'Paid', w: 120, align: 'right' }, { label: 'Deductible', w: 120, align: 'right' }],
+    [...(catRows.length ? catRows : [{ cells: ['No expenses recorded', pdfMoney(0), pdfMoney(0)] }]),
+     ...(homeRows.length ? [{ cells: ['Business expenses', pdfMoney(a.spent), pdfMoney(a.deductible)], bold: true }, ...homeRows] : []),
+     { cells: ['Total expenses', homeRows.length ? '' : pdfMoney(a.spent), pdfMoney(totalExpenses)], total: true }]);
+
+  // -- Net profit band --
+  y -= 8;
+  need(60);
+  page.drawRectangle({ x: M, y: y - 10, width: R - M, height: 28, color: C.ink });
+  text('Net profit  (Schedule C, line 31)', M + 12, y, { bold: true, size: 11, color: C.white });
+  text(pdfMoney(a.netProfit), R - 12, y, { bold: true, size: 13, color: C.white, align: 'right' });
+  y -= 30;
+  para('Cash basis: income counts when a payment is received and expenses when they are paid. "Deductible" is what the tax return counts: meals at 50%, internet at its business-use share, driving at the IRS mileage rate. Net profit is total income less total expenses, the same figure as Schedule C line 31.');
+
+  // -- Every deposit (detail starts on its own page, so page 1 is the
+  // one-page summary) --
+  newPage();
+  heading('Income detail');
+  table('Income detail', [{ label: 'Date received', w: 100 }, { label: 'Invoice #', w: 100 }, { label: 'Client', w: 212 }, { label: 'Amount', w: 100, align: 'right' }],
+    [...a.deposits.map(r => ({ cells: [fmtDate(invoicePaidDateStr(r)), r.invoiceNum || '', r.clientName || '', pdfMoney(invoiceRecordTotal(r))] })),
+     { cells: [`${a.deposits.length} deposit${a.deposits.length === 1 ? '' : 's'}`, '', '', pdfMoney(a.revenue)], total: true }]);
+
+  // -- Every expense, oldest first --
+  heading('Expense detail');
+  table('Expense detail', [{ label: 'Date', w: 70 }, { label: 'Category', w: 116 }, { label: 'Description', w: 186 }, { label: 'Paid', w: 70, align: 'right' }, { label: 'Deductible', w: 70, align: 'right' }],
+    [...[...a.expenses].reverse().map(e => ({ cells: [fmtDate(e.date), e.category,
+        (e.description || '') + (isMileage(e) ? `${e.description ? ' - ' : ''}${e.miles} mi × $${e.mileRate}` : ''),
+        pdfMoney(e.amount), pdfMoney(e.amount * deductiblePct(e))] })),
+     { cells: [`${a.expenses.length} expense${a.expenses.length === 1 ? '' : 's'}`, '', '', pdfMoney(a.spent), pdfMoney(a.deductible)], total: true }]);
+  if (ho > 0) para(`The home office (${pdfMoney(ho)}) is worked out on Form 8829 from the home's costs and is not in this list.`);
+
+  // -- Footer on every page --
+  const pages = doc.getPages();
+  pages.forEach((p, i) => {
+    p.drawLine({ start: { x: M, y: 50 }, end: { x: R, y: 50 }, thickness: 0.5, color: C.line });
+    p.drawText(pdfSafeText(`Cirrobound Solutions LLC  ·  Profit and Loss  ·  ${a.year}`), { x: M, y: 38, size: 8, font, color: C.slate });
+    const pg = `Page ${i + 1} of ${pages.length}`;
+    p.drawText(pg, { x: R - widthOf(pg, font, 8), y: 38, size: 8, font, color: C.slate });
+    p.drawText(pdfSafeText(`Prepared ${fmtDate(todayIso)} from the business's own records. Not audited.`), { x: M, y: 27, size: 7.5, font, color: C.slate });
+  });
+  return doc.save();
 }
 
 // ── Summary ────────────────────────────────────────────
