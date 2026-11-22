@@ -3849,21 +3849,31 @@ function setExpenseFrequency(id, value) {
 }
 
 // The year's recurring costs: each one (same category, description and how
-// often) listed once at its latest amount, with what that comes to over a
-// full year and what's been paid so far this year. Largest first.
+// often) listed once, with what's actually been paid this year, its
+// typical amount and a full-year estimate. Bills that vary (utilities,
+// usage-based subscriptions) use their average, not the latest bill:
+// monthly = average x 12, yearly = the latest payment. The estimate is
+// for planning only - taxes count each payment as actually made.
+// Largest estimate first.
 function recurringCosts(a) {
   const items = {};
   // a.expenses is newest first, so the first one seen is the latest
   a.expenses.filter(e => FREQUENCY_PER_YEAR[e.frequency]).forEach(e => {
     const key = [e.category, (e.description || '').trim().toLowerCase(), e.frequency].join('\n');
     const it = items[key] || (items[key] = { category: e.category, description: (e.description || '').trim(), frequency: e.frequency,
-                                              latest: e.amount, latestDate: e.date, pct: deductiblePct(e), count: 0, paid: 0 });
+                                              latest: e.amount, latestDate: e.date, pct: deductiblePct(e),
+                                              count: 0, paid: 0, low: e.amount, high: e.amount });
     it.count++;
     it.paid += e.amount;
+    it.low = Math.min(it.low, e.amount);
+    it.high = Math.max(it.high, e.amount);
   });
-  return Object.values(items)
-    .map(it => ({ ...it, perYear: it.latest * FREQUENCY_PER_YEAR[it.frequency] }))
-    .sort((p, q) => q.perYear - p.perYear);
+  return Object.values(items).map(it => {
+    const average = it.paid / it.count;
+    const varies = it.high - it.low > 0.005;
+    const perYear = it.frequency === 'monthly' ? average * 12 : it.latest;
+    return { ...it, average, varies, perYear };
+  }).sort((p, q) => q.perYear - p.perYear);
 }
 function recurringCostsHtml(a) {
   const list = recurringCosts(a);
@@ -3875,22 +3885,25 @@ function recurringCostsHtml(a) {
   return `<div class="recurring">
     <h3>Recurring costs</h3>
     <div class="table-scroll"><table>
-      <thead><tr><th>Cost</th><th>How often</th><th style="text-align:right">Latest</th><th style="text-align:right">Per year</th><th style="text-align:right">Paid in ${a.year}</th></tr></thead>
+      <thead><tr><th>Cost</th><th>How often</th><th style="text-align:right">Typical amount</th><th style="text-align:right">Paid in ${a.year}</th><th style="text-align:right">Full year (estimate)</th></tr></thead>
       <tbody>
         ${list.map(it => `<tr>
           <td>${escHtml(it.description || it.category)}${it.description && it.description.toLowerCase() !== it.category.toLowerCase()
             ? `<span class="exp-count">${escHtml(it.category)}</span>` : ''}</td>
           <td>${FREQUENCY_NAMES[it.frequency]}</td>
-          <td class="amount" style="text-align:right">${fmtMoney(it.latest)}<span class="exp-count">${fmtDate(it.latestDate)}</span></td>
-          <td class="amount" style="text-align:right">${fmtMoney(it.perYear)}</td>
+          <td class="amount" style="text-align:right">${it.frequency === 'monthly' && it.count > 1
+            ? `${fmtMoney(it.average)} avg<span class="exp-count">${it.varies ? `varies ${fmtMoney(it.low)}&ndash;${fmtMoney(it.high)}` : 'same each time'}</span>`
+            : `${fmtMoney(it.latest)}<span class="exp-count">${fmtDate(it.latestDate)}</span>`}</td>
           <td class="amount" style="text-align:right">${fmtMoney(it.paid)}<span class="exp-count">${it.count} payment${it.count === 1 ? '' : 's'}</span></td>
+          <td class="amount" style="text-align:right">${fmtMoney(it.perYear)}</td>
         </tr>`).join('')}
-        <tr class="exp-total"><td colspan="3">Total per year</td><td class="amount" style="text-align:right">${fmtMoney(perYear)}</td>
-          <td class="amount" style="text-align:right">${fmtMoney(paid)}</td></tr>
+        <tr class="exp-total"><td colspan="3">Total</td><td class="amount" style="text-align:right">${fmtMoney(paid)}</td>
+          <td class="amount" style="text-align:right">${fmtMoney(perYear)}</td></tr>
       </tbody>
     </table></div>
-    <p class="recurring-note">Per year is the latest amount &times; 12 for a monthly cost, &times; 1 for a yearly one.
-      ${Math.abs(deductible - perYear) > 0.005 ? `${fmtMoney(deductible)} of it is deductible (internet at its business-use %, meals at 50%).` : ''}</p>
+    <p class="recurring-note">Full year is an estimate for planning: a monthly cost's average &times; 12 (bills that vary use their
+      average), a yearly one's latest payment. Your taxes only ever count what you actually paid &mdash; each bill at its own amount.
+      ${Math.abs(deductible - perYear) > 0.005 ? `${fmtMoney(deductible)} of the estimate is deductible (internet at its business-use %, meals at 50%).` : ''}</p>
   </div>`;
 }
 
