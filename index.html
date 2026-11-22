@@ -267,6 +267,8 @@
     .form-item .flinks { white-space: nowrap; text-align: right; display: flex; gap: 10px; align-items: baseline; }
     .form-item .flinks a { color: var(--accent); font-size: 0.8rem; text-decoration: none; }
     .form-item .flinks a:hover { text-decoration: underline; }
+    .forms-download { margin-top: 18px; padding: 14px 16px; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; }
+    .forms-download p { margin: 8px 0 0; font-size: 0.8rem; color: var(--muted); line-height: 1.45; }
     @media (max-width: 640px) {
       .form-item { grid-template-columns: 1fr; }
       .form-item .flinks { text-align: left; }
@@ -2381,7 +2383,8 @@ const TAX_RULES = {
     // Child Tax Credit per child under 17; up to `refundable` of it can be
     // paid out (15% of earned income over $2,500). Phases out $50 per
     // $1,000 of AGI over the start.
-    ctc: { perChild: 2200, refundable: 1700, earnedFloor: 2500, refundRate: 0.15,
+    // otherDependent: the $500 credit for a dependent who isn't a child under 17
+    ctc: { perChild: 2200, refundable: 1700, earnedFloor: 2500, refundRate: 0.15, otherDependent: 500,
            phaseoutStart: { single: 200000, hoh: 200000, mfj: 400000 } },
     // Earned Income Credit by number of qualifying children (3 = 3 or more):
     // rate x earned income up to max, less phaseRate x income over the start
@@ -2584,23 +2587,61 @@ function buildHomeOffice(year, profitBeforeHome, agiBeforeHome, itemizing) {
   });
 }
 
-// -- Form 8829 download ----------------------------------------------------
-// The IRS's own fillable Form 8829 for each year the app has it. A blank
-// copy is kept in forms/ because irs.gov doesn't let other sites fetch it.
-// boxes: form line -> the PDF's box name (f1_NN, in order down the page;
-// two-column lines are (a) direct then (b) indirect). Read off the 2026 PDF.
+// -- Filled-in IRS forms ---------------------------------------------------
+// The IRS's own fillable forms, for each year the app has them. Blank copies
+// are kept in forms/ because irs.gov doesn't let other sites fetch them.
+// Only a year's FINAL form belongs here (the IRS posts them Oct-Jan): last
+// year's form has its lines in other places.
+// boxes: form line -> the PDF's box name. f1_NN / f2_NN are the text boxes
+// on page 1 / 2, numbered down the page; c1_N[i] is a tick box, [i] the
+// i-th choice on that line. Read off each PDF with its boxes drawn on it.
 const IRS_FORMS = {
   '2026': {
-    f8829: 'forms/f8829-2026.pdf',
-    boxes: {
-      1: 'f1_03', 2: 'f1_04', 3: 'f1_05', 7: 'f1_09', 8: 'f1_10',
-      '9a': 'f1_11', '9b': 'f1_12', '10a': 'f1_13', '10b': 'f1_14', '11a': 'f1_15', '11b': 'f1_16', '12a': 'f1_17', '12b': 'f1_18',
-      13: 'f1_19', 14: 'f1_20', 15: 'f1_21',
-      '16a': 'f1_22', '16b': 'f1_23', '17a': 'f1_24', '17b': 'f1_25', '18a': 'f1_26', '18b': 'f1_27', '19a': 'f1_28', '19b': 'f1_29',
-      '20a': 'f1_30', '20b': 'f1_31', '21a': 'f1_32', '21b': 'f1_33', '22a': 'f1_34', '22b': 'f1_35', '23a': 'f1_36', '23b': 'f1_37',
-      24: 'f1_38', 25: 'f1_39', 26: 'f1_40', 27: 'f1_41', 28: 'f1_42', 29: 'f1_43', 30: 'f1_44', 31: 'f1_45',
-      32: 'f1_46', 33: 'f1_47', 34: 'f1_48', 35: 'f1_49', 36: 'f1_50',
-      37: 'f1_51', 38: 'f1_52', 39: 'f1_53', 40: 'f1_54', 41: 'f1_55', 42: 'f1_56', 43: 'f1_57', 44: 'f1_58'
+    '8829': {
+      file: 'forms/f8829-2026.pdf',
+      // Two-column lines are (a) direct then (b) indirect expenses
+      boxes: {
+        1: 'f1_03', 2: 'f1_04', 3: 'f1_05', 7: 'f1_09', 8: 'f1_10',
+        '9a': 'f1_11', '9b': 'f1_12', '10a': 'f1_13', '10b': 'f1_14', '11a': 'f1_15', '11b': 'f1_16', '12a': 'f1_17', '12b': 'f1_18',
+        13: 'f1_19', 14: 'f1_20', 15: 'f1_21',
+        '16a': 'f1_22', '16b': 'f1_23', '17a': 'f1_24', '17b': 'f1_25', '18a': 'f1_26', '18b': 'f1_27', '19a': 'f1_28', '19b': 'f1_29',
+        '20a': 'f1_30', '20b': 'f1_31', '21a': 'f1_32', '21b': 'f1_33', '22a': 'f1_34', '22b': 'f1_35', '23a': 'f1_36', '23b': 'f1_37',
+        24: 'f1_38', 25: 'f1_39', 26: 'f1_40', 27: 'f1_41', 28: 'f1_42', 29: 'f1_43', 30: 'f1_44', 31: 'f1_45',
+        32: 'f1_46', 33: 'f1_47', 34: 'f1_48', 35: 'f1_49', 36: 'f1_50',
+        37: 'f1_51', 38: 'f1_52', 39: 'f1_53', 40: 'f1_54', 41: 'f1_55', 42: 'f1_56', 43: 'f1_57', 44: 'f1_58'
+      }
+    },
+    'C': {
+      file: 'forms/f1040sc-2026.pdf',
+      boxes: Object.assign({
+        1: 'f1_13', 2: 'f1_14', 3: 'f1_15', 4: 'f1_16', 5: 'f1_17', 6: 'f1_18', 7: 'f1_19',
+        8: 'f1_20', 9: 'f1_21', 10: 'f1_22', 11: 'f1_23', 12: 'f1_24', 13: 'f1_25', 14: 'f1_26', 15: 'f1_27',
+        '16a': 'f1_28', '16b': 'f1_29', '16c': 'f1_31', 17: 'f1_32',   // (there is no f1_30)
+        18: 'f1_33', 19: 'f1_34', '20a': 'f1_35', '20b': 'f1_36', 21: 'f1_37', 22: 'f1_38', 23: 'f1_39',
+        '24a': 'f1_40', '24b': 'f1_41', 25: 'f1_42', 26: 'f1_43', '27a': 'f1_44', '27b': 'f1_45',
+        28: 'f1_46', 29: 'f1_47', '30home': 'f1_48', '30office': 'f1_49', 30: 'f1_50', 31: 'f1_51',
+        cash: 'c1_1[0]',            // F: accounting method - cash
+        participateYes: 'c1_2[0]',  // G: materially participated - yes
+        '44a': 'f2_12',             // Part IV: business miles
+        48: 'f2_33'                 // Part V total
+      // Part V: nine rows of description (vN) + amount (vNamt), f2_15 to f2_32
+      }, Object.fromEntries([...Array(9)].flatMap((_, i) => [[`v${i + 1}`, `f2_${15 + 2 * i}`], [`v${i + 1}amt`, `f2_${16 + 2 * i}`]])))
+    },
+    'SE': {
+      file: 'forms/f1040sse-2026.pdf',
+      // Line 7 (the Social Security wage base) is printed on the form
+      boxes: { 2: 'f1_05', 3: 'f1_06', '4a': 'f1_07', '4c': 'f1_09', 6: 'f1_12', '8a': 'f1_14', '8d': 'f1_17',
+               9: 'f1_18', 10: 'f1_19', 11: 'f1_20', 12: 'f1_21', 13: 'f1_22' }
+    },
+    '8812': {
+      file: 'forms/f1040s8-2026.pdf',
+      boxes: {
+        1: 'f1_03', 3: 'f1_08', 4: 'f1_09', 5: 'f1_10', 6: 'f1_11', 7: 'f1_12', 8: 'f1_13', 9: 'f1_14',
+        10: 'f1_15', 11: 'f1_16', 12: 'f1_17', 13: 'f1_18', 14: 'f1_19', '12no': 'c1_1[0]', '12yes': 'c1_1[1]',
+        '16a': 'f2_02', '16bkids': 'f2_03', '16b': 'f2_04', 17: 'f2_05', '18a': 'f2_06', 19: 'f2_08', 20: 'f2_09',
+        '19no': 'c2_1[0]', '19yes': 'c2_1[1]', '20no': 'c2_2[0]', '20yes': 'c2_2[1]',
+        21: 'f2_10', 22: 'f2_11', 23: 'f2_12', 24: 'f2_13', 25: 'f2_14', 26: 'f2_15', 27: 'f2_16'
+      }
     }
   }
 };
@@ -2661,34 +2702,189 @@ function form8829Lines(ho) {
 // line you'd only fill in if it applies is left blank.
 function form8829Text(L) {
   const shown = new Set(['1', '2', '3', '7', '8', '14', '15', '24', '26', '27', '28', '30', '32', '33', '34', '36', '43', '44']);
-  const money = x => x.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const out = {};
   Object.entries(L).forEach(([k, v]) => {
     if (!v && !shown.has(k)) return;
     out[k] = k === '1' || k === '2' ? Math.round(v).toLocaleString('en-US')
       : k === '3' || k === '7' ? v.toFixed(4)
-      : k === '41' ? v.toFixed(3) : money(v);
+      : k === '41' ? v.toFixed(3) : formMoney(v);
   });
   return out;
 }
 
-// Writes the text into the blank IRS form and returns the new PDF's bytes.
-// PDFLib: the pdf-lib library; bytes: the blank form; boxes: line -> box.
-// The XFA copy of the form is dropped so every PDF reader shows the boxes
-// filled in.
-async function fill8829Pdf(PDFLib, bytes, text, boxes) {
+// Money as written on a form: 12,345.67
+const formMoney = x => x.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// A form's lines as the text written in its boxes: money with cents, the
+// lines in `whole` (counts, square feet, miles) as whole numbers, text as
+// is. A zero on a line not in `shown` is left blank.
+function formText(L, shown = [], whole = []) {
+  const out = {};
+  Object.entries(L).forEach(([k, v]) => {
+    if (typeof v === 'string') { if (v) out[k] = v; return; }
+    if (!v && !shown.includes(k)) return;
+    out[k] = whole.includes(k) ? Math.round(v).toLocaleString('en-US') : formMoney(v);
+  });
+  return out;
+}
+
+// -- Schedule C: the business ----------------------------------------------
+// The app's expense categories on Schedule C's expense lines (Part II). The
+// rest go in Part V "Other expenses", by name, and its total on line 27b.
+const SCHEDULE_C_LINE = {
+  'Advertising & Marketing': '8', 'Car & Mileage': '9', 'Contract Labor': '11', 'Insurance': '15',
+  'Legal & Professional': '17', 'Office Expense': '18', 'Rent / Lease': '20b', 'Equipment & Repairs': '21',
+  'Supplies': '22', 'Taxes & Licenses': '23', 'Travel': '24a', 'Meals (50%)': '24b',
+  'Utilities & Phone': '25', 'Internet': '25'
+};
+const SCHEDULE_C_EXPENSE_LINES = ['8', '9', '10', '11', '12', '13', '14', '15', '16a', '16b', '16c', '17', '18', '19',
+  '20a', '20b', '21', '22', '23', '24a', '24b', '25', '26', '27a', '27b'];
+
+// Every Schedule C line from the year's books (cash basis): deposits on
+// line 1, each category's deductible amount on its line (meals already at
+// 50%, internet at its business-use %), the home office on line 30.
+function scheduleCLines(a) {
+  const c = x => Math.round(x * 100) / 100;
+  const L = {}, other = [];
+  a.categories.forEach(cat => {
+    if (!cat.deductible) return;
+    const line = SCHEDULE_C_LINE[cat.category];
+    if (line) L[line] = c((L[line] || 0) + cat.deductible);
+    else other.push([cat.category, c(cat.deductible)]);
+  });
+  // Part V has nine rows; any more are added together on the last
+  if (other.length > 9) {
+    const rest = other.splice(8);
+    other.push(['Other expenses (combined)', c(rest.reduce((t, r) => t + r[1], 0))]);
+  }
+  other.forEach(([name, amount], i) => { L[`v${i + 1}`] = name; L[`v${i + 1}amt`] = amount; });
+  if (other.length) { L[48] = c(other.reduce((t, r) => t + r[1], 0)); L['27b'] = L[48]; }
+  L[1] = c(a.revenue); L[3] = L[1]; L[5] = L[3]; L[7] = L[5];   // no returns, no goods sold
+  L[28] = c(SCHEDULE_C_EXPENSE_LINES.reduce((t, k) => t + (L[k] || 0), 0));
+  L[29] = c(L[7] - L[28]);
+  // Line 30: Form 8829's line 36, or the simplified method (with the two
+  // square footages it asks for)
+  const ho = a.homeOffice;
+  L[30] = ho.used === 'actual' ? form8829Lines(ho)[36] : c(ho.deduction || 0);
+  if (ho.used === 'simplified' && ho.deduction && ho.homeSqft) { L['30home'] = ho.homeSqft; L['30office'] = ho.officeSqft; }
+  L[31] = c(L[29] - L[30]);
+  // Part IV: business miles, when car costs are the standard mileage rate
+  const car = a.categories.find(x => x.category === MILEAGE_CATEGORY);
+  if (car && car.miles) L['44a'] = car.miles;
+  return L;
+}
+
+// -- Schedule SE: self-employment tax --------------------------------------
+// From Schedule C line 31. Line 8a (your own W-2 Social Security wages) is
+// left blank, as the app's self-employment tax assumes none.
+function scheduleSELines(a) {
+  const c = x => Math.round(x * 100) / 100;
+  const L = {};
+  L[2] = scheduleCLines(a)[31];
+  L[3] = L[2];
+  L['4a'] = L[3] > 0 ? c(L[3] * 0.9235) : L[3];
+  L['4c'] = L['4a'];
+  if (L['4c'] < 400) return L;             // under $400: no self-employment tax
+  L[6] = L['4c'];
+  L[9] = TAX_RULES[a.year].ssWageBase;     // line 7 less line 8d (none)
+  L[10] = c(Math.min(L[6], L[9]) * 0.124);
+  L[11] = c(L[6] * 0.029);
+  L[12] = c(L[10] + L[11]);
+  L[13] = c(L[12] * 0.5);
+  return L;
+}
+
+// -- Schedule 8812: child tax credit ---------------------------------------
+// Part I (the credit against income tax) and Part II-A/B (the additional,
+// refundable part), worked the way the form does. Returns { L, checks }.
+function schedule8812Lines(a) {
+  const c = x => Math.round(x * 100) / 100;
+  const t = a.taxes, r = TAX_RULES[a.year].ctc;
+  const L = {}, checks = [];
+  L[1] = c(a.agi); L[3] = L[1];            // no excluded income (lines 2a-2d)
+  L[4] = a.kidsUnder17; L[5] = c(r.perChild * L[4]);
+  L[6] = a.kids - a.kidsUnder17; L[7] = c(r.otherDependent * L[6]);
+  L[8] = c(L[5] + L[7]);
+  L[9] = r.phaseoutStart[t.status];
+  // Over the threshold, rounded up to the next $1,000
+  L[10] = Math.ceil(Math.max(0, L[3] - L[9]) / 1000) * 1000;
+  L[11] = c(L[10] * 0.05);
+  if (L[8] <= L[11]) { checks.push('12no'); return { L, checks }; }
+  checks.push('12yes');
+  L[12] = c(L[8] - L[11]);
+  L[13] = c(t.fedIncomeTax);               // Credit Limit Worksheet A: the income tax (no other credits)
+  L[14] = Math.min(L[12], L[13]);
+  // Part II-A: the rest may be paid to you, up to $1,700 a child
+  L['16a'] = c(L[12] - L[14]);
+  if (!L['16a'] || !L[4]) return { L, checks };
+  L['16bkids'] = L[4]; L['16b'] = c(r.refundable * L[4]);
+  L[17] = Math.min(L['16a'], L['16b']);
+  L['18a'] = c(t.earned);
+  if (L['18a'] > r.earnedFloor) { checks.push('19yes'); L[19] = c(L['18a'] - r.earnedFloor); }
+  else { checks.push('19no'); L[19] = 0; }
+  L[20] = c(L[19] * r.refundRate);
+  if (L['16b'] >= 3 * r.refundable) {     // three or more children
+    checks.push('20yes');
+    if (L[20] >= L[17]) L[27] = L[17];
+    else {
+      // Part II-B: Social Security and Medicare paid, less the earned income credit
+      L[21] = c(a.wages * 0.0765);         // W-2 boxes 4 and 6 (estimated from wages)
+      L[22] = c((scheduleSELines(a)[13]) || 0);
+      L[23] = c(L[21] + L[22]);
+      L[24] = c(t.eitc);
+      L[25] = c(Math.max(0, L[23] - L[24]));
+      L[26] = Math.max(L[20], L[25]);
+      L[27] = Math.min(L[17], L[26]);
+    }
+  } else { checks.push('20no'); L[27] = Math.min(L[17], L[20]); }
+  return { L, checks };
+}
+
+// The forms the app fills in, in the order they go behind Form 1040
+// (attachment sequence). applies: whether this year's return needs it;
+// fill: { text: line -> box text, checks: tick boxes to tick }.
+const FILLED_FORMS = [
+  { key: 'C', name: 'Schedule C', applies: a => true,
+    fill: a => ({ text: formText(scheduleCLines(a), ['1', '3', '5', '7', '28', '29', '30', '31'], ['30home', '30office', '44a']),
+                  checks: ['cash', 'participateYes'] }) },
+  { key: 'SE', name: 'Schedule SE', applies: a => a.seTax > 0,
+    fill: a => ({ text: formText(scheduleSELines(a), ['2', '3', '4a', '4c', '6', '9', '10', '11', '12', '13']) }) },
+  { key: '8812', name: 'Schedule 8812', applies: a => !!(a.taxes && a.taxes.ctcFull),
+    fill: a => { const r = schedule8812Lines(a);
+      return { text: formText(r.L, ['1', '3', '5', '8', '9', '10', '11', '12', '13', '14', '16a', '16b', '17', '18a', '20', '25', '26', '27'], ['4', '6', '16bkids']),
+               checks: r.checks }; } },
+  { key: '8829', name: 'Form 8829', applies: a => a.homeOffice.used === 'actual' && a.homeOffice.deduction > 0,
+    fill: a => ({ text: form8829Text(form8829Lines(a.homeOffice)) }) }
+];
+
+// Writes the text and ticks into a blank IRS form; returns the pdf-lib
+// document. PDFLib: the pdf-lib library; bytes: the blank form; boxes:
+// line -> box. Any XFA copy of the form is dropped so every PDF reader
+// shows the boxes filled in.
+async function fillIrsPdf(PDFLib, bytes, fill, boxes) {
   const doc = await PDFLib.PDFDocument.load(bytes);
   const form = doc.getForm();
+  // Some forms number their boxes f1_03, others f1_3: leading zeros are
+  // dropped on both sides so either spelling finds the box
+  const plain = s => s.replace(/_0+(\d)/, '_$1');
   const byBox = {};
-  form.getFields().forEach(f => { const m = f.getName().match(/\.(f1_\d+)\[0\]$/); if (m) byBox[m[1]] = f; });
-  Object.entries(text).forEach(([line, value]) => {
-    const field = byBox[boxes[line]];
-    if (!field) throw new Error(`no box for line ${line}`);
-    field.setText(value);
+  form.getFields().forEach(f => {
+    const m = f.getName().match(/\.([fc]\d_\d+)\[(\d+)\]$/);
+    if (!m) return;
+    const name = plain(m[1]);
+    byBox[`${name}[${m[2]}]`] = f;
+    if (m[2] === '0' && name[0] === 'f') byBox[name] = f;   // text boxes by name alone
   });
+  const box = line => {
+    const field = boxes[line] && byBox[plain(boxes[line])];
+    if (!field) throw new Error(`no box for line ${line}`);
+    return field;
+  };
+  Object.entries(fill.text).forEach(([line, value]) => box(line).setText(value));
+  (fill.checks || []).forEach(line => box(line).check());
   form.deleteXFA();
   form.updateFieldAppearances();
-  return doc.save();
+  return doc;
 }
 
 // pdf-lib is only loaded the first time a form is downloaded
@@ -2709,24 +2905,53 @@ function loadPdfLib() {
 // Hash of pdf-lib 1.17.1's file, so a changed copy on the CDN is refused
 const PDF_LIB_SRI = 'sha384-weMABwrltA6jWR8DDe9Jp5blk+tZQh7ugpCsF3JwSA53WZM9/14PjS5LAJNHNjAI';
 
-// "Download Form 8829" on the Taxes tab: the selected year's form filled
-// in with the home office figures. Made in the browser - nothing is sent
-// anywhere. Name and Social Security number are left for you to write in.
-async function downloadForm8829() {
+// One form filled in from a year's figures, as a pdf-lib document
+async function filledFormDoc(PDFLib, year, key, a) {
+  const spec = IRS_FORMS[year][key];
+  const blank = await fetch(spec.file).then(r => {
+    if (!r.ok) throw new Error('the blank form could not be loaded');
+    return r.arrayBuffer();
+  });
+  return fillIrsPdf(PDFLib, blank, FILLED_FORMS.find(f => f.key === key).fill(a), spec.boxes);
+}
+
+// "Filled in" on the Taxes tab: the selected year's form filled in with
+// its figures, still editable. Made in the browser - nothing is sent
+// anywhere. Names and Social Security numbers are left for you to add.
+async function downloadFilledForm(key) {
   const year = document.getElementById('acctYear').value;
-  const irs = IRS_FORMS[year];
-  if (!irs) { alert(`The ${year} Form 8829 isn't in the app yet.`); return; }
-  const ho = buildAccounting(year).homeOffice;
-  if (!ho.bills || !ho.bills.length) { alert('Enter the office and home square feet first.'); return; }
+  const form = FILLED_FORMS.find(f => f.key === key);
+  if (!(IRS_FORMS[year] || {})[key]) { alert(`The ${year} ${form.name} isn't in the app yet.`); return; }
+  const a = buildAccounting(year);
+  if (key === '8829' && !(a.homeOffice.bills || []).length) { alert('Enter the office and home square feet first.'); return; }
   try {
-    const [PDFLib, blank] = await Promise.all([
-      loadPdfLib(),
-      fetch(irs.f8829).then(r => { if (!r.ok) throw new Error('the blank form could not be loaded'); return r.arrayBuffer(); })
-    ]);
-    const bytes = await fill8829Pdf(PDFLib, blank, form8829Text(form8829Lines(ho)), irs.boxes);
-    saveBlobAs(new Blob([bytes], { type: 'application/pdf' }), `Form 8829 ${year}.pdf`);
+    const doc = await filledFormDoc(await loadPdfLib(), year, key, a);
+    saveBlobAs(new Blob([await doc.save()], { type: 'application/pdf' }), `${form.name} ${year}.pdf`);
   } catch (e) {
-    alert('Form 8829 download failed: ' + e.message);
+    alert(`${form.name} download failed: ` + e.message);
+  }
+}
+function downloadForm8829() { return downloadFilledForm('8829'); }
+
+// "Download all filled forms": every form this year's return needs that the
+// app can fill, in filing order, as one PDF. Each is flattened (the boxes
+// become printed text) so they can share one file.
+async function downloadAllForms() {
+  const year = document.getElementById('acctYear').value;
+  const a = buildAccounting(year);
+  const list = FILLED_FORMS.filter(f => (IRS_FORMS[year] || {})[f.key] && f.applies(a));
+  if (!list.length) { alert(`No ${year} forms can be filled in yet.`); return; }
+  try {
+    const PDFLib = await loadPdfLib();
+    const out = await PDFLib.PDFDocument.create();
+    for (const f of list) {
+      const doc = await filledFormDoc(PDFLib, year, f.key, a);
+      doc.getForm().flatten();
+      (await out.copyPages(doc, doc.getPageIndices())).forEach(p => out.addPage(p));
+    }
+    saveBlobAs(new Blob([await out.save()], { type: 'application/pdf' }), `Tax forms ${year}.pdf`);
+  } catch (e) {
+    alert('Download failed: ' + e.message);
   }
 }
 
@@ -2850,7 +3075,9 @@ function buildIncomeTaxes(a, status) {
   // Child Tax Credit: first against income tax, the rest refundable up to
   // $1,700 a child as the "additional child tax credit"
   const c = rules.ctc;
-  const ctcFull = Math.max(0, c.perChild * a.kidsUnder17
+  // (plus $500 for each child 17 or older - Schedule 8812 lines 6-7 -
+  // which counts against income tax only)
+  const ctcFull = Math.max(0, c.perChild * a.kidsUnder17 + (c.otherDependent || 0) * (a.kids - a.kidsUnder17)
     - 50 * Math.ceil(Math.max(0, a.agi - c.phaseoutStart[status]) / 1000));
   const ctcUsed = Math.min(ctcFull, fedIncomeTax);
   let actc = 0;
@@ -3172,7 +3399,8 @@ function renderTaxes(a) {
       : '20% of business income after half the SE tax' }) +
     taxRow('Taxable income', t.fedTaxable, { sub: true }) +
     taxRow('Income tax', t.fedIncomeTax, { note: `${a.year} brackets, ${status.toLowerCase()}` }) +
-    (t.ctcFull ? taxRow('Child tax credit', t.ctcUsed, { minus: true, note: `${a.kidsUnder17} &times; $2,200 &mdash; used up to the tax` }) : '') +
+    (t.ctcFull ? taxRow('Child tax credit', t.ctcUsed, { minus: true, note: `${a.kidsUnder17} &times; $2,200`
+      + (a.kids > a.kidsUnder17 ? ` + ${a.kids - a.kidsUnder17} &times; $500 (17 or older)` : '') + ' &mdash; used up to the tax' }) : '') +
     (t.addlMedicare ? taxRow('Additional Medicare tax', t.addlMedicare, { plus: true, note: '0.9% above the threshold (Form 8959)' }) : '') +
     taxRow('Federal income tax', t.fedAfterCtc + t.addlMedicare, { total: true }));
   const scRules = rules.sc;
@@ -3285,7 +3513,7 @@ function homeOfficePanel(a) {
     (ho.used === 'simplified' && ho.actual > ho.simplified ? `<p class="pnote">Form 8829 would be ${fmtMoney(ho.actual - ho.simplified)} more.</p>` : '') +
     (partialBills(a.year) ? `<p class="pnote">${partialBills(a.year)}; the write-off grows as you add the rest of the year.</p>` : '') +
     (ho.throughMonth < 12 ? `<p class="pnote">Depreciation and the simplified method count to ${SHORT_MONTHS[ho.throughMonth - 1]}, the latest month your bills reach.</p>` : '') +
-    (IRS_FORMS[a.year] ? `<p class="pnote"><button class="btn btn-ghost btn-sm" onclick="downloadForm8829()">Download Form 8829 (PDF)</button><br>`
+    ((IRS_FORMS[a.year] || {})['8829'] ? `<p class="pnote"><button class="btn btn-ghost btn-sm" onclick="downloadForm8829()">Download Form 8829 (PDF)</button><br>`
       + `The IRS form filled in with these figures &mdash; add your name and Social Security number.`
       + (ho.used === 'simplified' ? ' The simplified method doesn\'t file it; it\'s for comparing.' : '') + '</p>'
       : `<p class="pnote">The ${a.year} Form 8829 download will be added once the IRS posts that year's form.</p>`) +
@@ -3348,16 +3576,15 @@ function filingForms(a) {
         + (t ? (t.total < 0 ? `Estimated refund ${m(-t.total)} (federal and SC together).` : `Estimated tax ${m(t.total)} (federal and SC together).`) : '') },
     { name: 'Schedule 1', title: 'Additional income and adjustments', link: IRS_PDF('f1040s1'),
       what: `Business profit on line 3 (${m(a.netProfit)}); the deductible half of self-employment tax on line 15 (${m(a.seTaxHalf)}).` },
-    { name: 'Schedule C', title: 'Profit or loss from business', link: IRS_PDF('f1040sc'),
+    { name: 'Schedule C', fill: 'C', title: 'Profit or loss from business', link: IRS_PDF('f1040sc'),
       what: `Cirrobound's income and expenses. Home office on line 30 (${m(ho.deduction)}`
         + (ho.used === 'simplified' && ho.deduction ? ', simplified method &mdash; worked out on Schedule C itself' : '')
         + `); net profit on line 31 (${m(a.netProfit)}).` }
   ];
-  if (ho.used === 'actual' && ho.deduction) fed.push({ name: 'Form 8829', title: 'Business use of your home', link: IRS_PDF('f8829'),
-    what: `How the home office write-off (${m(ho.deduction)}) is worked out; line 36 goes on Schedule C line 30.`,
-    extra: IRS_FORMS[a.year] ? '<a href="#" onclick="downloadForm8829(); return false">Filled in</a>' : '' });
+  if (ho.used === 'actual' && ho.deduction) fed.push({ name: 'Form 8829', fill: '8829', title: 'Business use of your home', link: IRS_PDF('f8829'),
+    what: `How the home office write-off (${m(ho.deduction)}) is worked out; line 36 goes on Schedule C line 30.` });
   if (a.seTax || (t && t.addlMedicare)) {
-    fed.push({ name: 'Schedule SE', title: 'Self-employment tax', link: IRS_PDF('f1040sse'),
+    fed.push({ name: 'Schedule SE', fill: 'SE', title: 'Self-employment tax', link: IRS_PDF('f1040sse'),
       what: `Social Security and Medicare on the business profit: ${m(a.seTax)}.` });
     fed.push({ name: 'Schedule 2', title: 'Additional taxes', link: IRS_PDF('f1040s2'),
       what: `Carries the self-employment tax (${m(a.seTax)}) to Form 1040.` });
@@ -3371,10 +3598,11 @@ function filingForms(a) {
         what: `Deduction for business income (up to 20% of it, limited by taxable income): ${m(t.qbiDeduction)}.` });
   if (t && t.itemizing) fed.push({ name: 'Schedule A', title: 'Itemized deductions', link: IRS_PDF('f1040sa'),
     what: `Itemizing beats the standard deduction: ${m(t.deduction)}.` });
-  if (t && t.ctcFull) fed.push({ name: 'Schedule 8812', title: 'Credits for qualifying children', link: IRS_PDF('f1040s8'),
+  if (t && t.ctcFull) fed.push({ name: 'Schedule 8812', fill: '8812', title: 'Credits for qualifying children', link: IRS_PDF('f1040s8'),
     what: `Child tax credit ${m(t.ctcUsed)}` + (t.actc ? ` plus ${m(t.actc)} paid to you (additional child tax credit).` : '.') });
-  if (t && t.eitc) fed.push({ name: 'Schedule EIC', title: 'Earned income credit', link: IRS_PDF('f1040sei'),
-    what: `Lists the children the credit is claimed for: ${m(t.eitc)}.` });
+  // personal: only asks for each child's details, so there's nothing to fill in
+  if (t && t.eitc) fed.push({ name: 'Schedule EIC', personal: true, title: 'Earned income credit', link: IRS_PDF('f1040sei'),
+    what: `Lists the children the credit is claimed for (name, Social Security number, birth year, months at home): ${m(t.eitc)}.` });
 
   // An SC form: its link, plus a note when that year's isn't posted yet
   const scItem = (name, formYr, title, what) => {
@@ -3408,12 +3636,28 @@ function filingForms(a) {
 
 // The Forms for Your Return card
 function formsCard(a) {
+  const forms = IRS_FORMS[a.year] || {};
+  // A form the app can fill for this year gets a "Filled in" link too
+  const canFill = f => f.fill && forms[f.fill];
   const item = f => `<div class="form-item">
       <div class="fname">${f.name}<small>${f.title}</small></div>
       <div class="fwhat">${f.what}</div>
-      <div class="flinks">${f.extra || ''}<a href="${f.link}" target="_blank" rel="noopener">${f.label || 'Blank form'} &#8599;</a></div>
+      <div class="flinks">${canFill(f) ? `<a href="#" onclick="downloadFilledForm('${f.fill}'); return false">Filled in</a>` : ''}<a href="${f.link}" target="_blank" rel="noopener">${f.label || 'Blank form'} &#8599;</a></div>
     </div>`;
-  return filingForms(a).map(g => `<div class="form-group">${g.head}</div>${g.items.map(item).join('')}`).join('')
+  const groups = filingForms(a);
+  const all = groups.flatMap(g => g.items).filter(f => !/ES$/.test(f.name));   // this year's return, not next year's estimates
+  const filled = all.filter(canFill).map(f => f.name);
+  const notYet = all.filter(f => !canFill(f) && !f.personal).map(f => f.name);
+  const personal = all.filter(f => f.personal).map(f => f.name);
+  const list = names => names.length > 1 ? names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1] : names[0];
+  return groups.map(g => `<div class="form-group">${g.head}</div>${g.items.map(item).join('')}`).join('')
+    + (filled.length ? `<div class="forms-download">
+        <button class="btn btn-primary" onclick="downloadAllForms()">Download all filled forms (PDF)</button>
+        <p>${list(filled)} filled in from these figures, in one PDF &mdash; add your names and Social Security numbers.
+        ${notYet.length ? `${list(notYet)} ${notYet.length > 1 ? 'are' : 'is'} filled in once the ${a.year} version is posted and added to the app.` : ''}
+        ${personal.length ? `${list(personal)} only ${personal.length > 1 ? 'ask' : 'asks'} for your children's details, so ${personal.length > 1 ? 'they are' : 'it is'} left for you.` : ''}
+        Check them against your tax software or accountant before you file.</p>
+      </div>` : '')
     + `<p class="tax-foot">Only the forms your figures call for are listed. Blank forms open on irs.gov and dor.sc.gov &mdash;
       the IRS link gives its newest version, so make sure it says ${a.year} at the top when you file; for a South Carolina form
       not posted yet, the link opens SCDOR's search for it. Tax software fills these in for you from the same figures.</p>`;
