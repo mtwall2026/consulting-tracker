@@ -237,6 +237,7 @@
     }
     .tax-inputs input:focus, .tax-inputs select:focus { outline: none; border-color: var(--accent); }
     .tax-inputs .hint { grid-column: 1 / -1; font-size: 0.76rem; color: var(--muted); margin-top: -6px; }
+    .tax-inputs .hint a { color: var(--accent); }
     /* Bills & statements: full width under the home costs */
     .tax-inputs .home-docs { grid-column: 1 / -1; }
     .home-docs .hint-line { font-size: 0.76rem; color: var(--muted); margin: -4px 0 10px; line-height: 1.45; }
@@ -1184,6 +1185,78 @@
       <label>Charity &mdash; goods (clothes, household items)
         <input type="number" data-itemized="charityGoods" min="0" step="0.01" placeholder="0.00" onchange="saveHomeInputs()" />
       </label>
+    </div>
+  </div>
+
+  <!-- The non-money answers Schedule C asks for: the top section (A-J) and
+       Part IV (the vehicle). The business's details are kept for every
+       year (state.scheduleC); the year's answers are saved for the selected
+       year (accountingYears[year].scheduleC). The Social Security number is
+       never asked for or stored. See scheduleCDetails. -->
+  <div class="card">
+    <h2>Schedule C Details</h2>
+    <p style="color:var(--muted);font-size:0.82rem;margin:-6px 0 14px">The questions at the top of Schedule C and about your car. They go on the filled-in forms; your Social Security number is never stored &mdash; add it by hand. The business address comes from Business Info on the Accounting tab.</p>
+    <div class="tax-inputs">
+      <div class="group">The business (kept for every year)</div>
+      <label>Your name (proprietor)
+        <input type="text" data-schc="name" placeholder="First and last name" onchange="saveScheduleCInputs()" />
+      </label>
+      <label>Principal business or profession (line A)
+        <input type="text" data-schc="business" placeholder="e.g. Engineering consulting" onchange="saveScheduleCInputs()" />
+      </label>
+      <label>Business code (line B)
+        <input type="text" data-schc="code" inputmode="numeric" maxlength="6" placeholder="6 digits" onchange="saveScheduleCInputs()" />
+      </label>
+      <label>EIN (line D) &mdash; blank if none
+        <input type="text" data-schc="ein" inputmode="numeric" maxlength="10" placeholder="12-3456789" onchange="saveScheduleCInputs()" />
+      </label>
+      <div class="hint">Line B's code is from the list at the end of the <a href="https://www.irs.gov/instructions/i1040sc" target="_blank" rel="noopener">Schedule C instructions &#8599;</a> (&ldquo;Principal Business or Professional Activity Codes&rdquo;) &mdash; pick the one closest to what you do. Line D: only an EIN the business itself has; leave it blank if you file under your SSN.</div>
+      <div class="group">This year</div>
+      <label>Started or bought the business this year? (line H)
+        <select data-schcyear="started" onchange="saveScheduleCInputs()">
+          <option value="">No</option>
+          <option value="yes">Yes</option>
+        </select>
+      </label>
+      <label>Payments that need a 1099? (line I)
+        <select data-schcyear="i1099" onchange="saveScheduleCInputs()">
+          <option value="">Work it out</option>
+          <option value="yes">Yes</option>
+          <option value="no">No</option>
+        </select>
+      </label>
+      <label>&hellip;did you or will you file them? (line J)
+        <select data-schcyear="j1099" onchange="saveScheduleCInputs()">
+          <option value="">Yes</option>
+          <option value="no">No</option>
+        </select>
+      </label>
+      <div class="hint" id="schc1099Hint"></div>
+      <div class="group">Your car (Part IV &mdash; only used when you have business miles)</div>
+      <label>Placed in service for business (line 43)
+        <input type="date" data-schc="vehicleDate" onchange="saveScheduleCInputs()" />
+      </label>
+      <label>All miles driven this year (odometer)
+        <input type="number" data-schcyear="totalMiles" min="0" step="1" placeholder="e.g. 12,000" onchange="saveScheduleCInputs()" />
+      </label>
+      <label>&hellip;of them commuting (line 44b)
+        <input type="number" data-schcyear="commutingMiles" min="0" step="1" placeholder="0" onchange="saveScheduleCInputs()" />
+      </label>
+      <label>Car available for personal use off duty? (line 45)
+        <select data-schc="personalUse" onchange="saveScheduleCInputs()">
+          <option value="">Not answered</option>
+          <option value="yes">Yes</option>
+          <option value="no">No</option>
+        </select>
+      </label>
+      <label>Another vehicle for personal use? (line 46)
+        <select data-schc="otherVehicle" onchange="saveScheduleCInputs()">
+          <option value="">Not answered</option>
+          <option value="yes">Yes</option>
+          <option value="no">No</option>
+        </select>
+      </label>
+      <div class="hint" id="schcCarHint"></div>
     </div>
   </div>
 
@@ -2649,6 +2722,7 @@ const IRS_FORMS = {
       file: 'forms/f8829-2026.pdf',
       // Two-column lines are (a) direct then (b) indirect expenses
       boxes: {
+        name: 'f1_01',   // name of proprietor (f1_02, the SSN, is left for you)
         1: 'f1_03', 2: 'f1_04', 3: 'f1_05', 7: 'f1_09', 8: 'f1_10',
         '9a': 'f1_11', '9b': 'f1_12', '10a': 'f1_13', '10b': 'f1_14', '11a': 'f1_15', '11b': 'f1_16', '12a': 'f1_17', '12b': 'f1_18',
         13: 'f1_19', 14: 'f1_20', 15: 'f1_21',
@@ -2668,9 +2742,20 @@ const IRS_FORMS = {
         18: 'f1_33', 19: 'f1_34', '20a': 'f1_35', '20b': 'f1_36', 21: 'f1_37', 22: 'f1_38', 23: 'f1_39',
         '24a': 'f1_40', '24b': 'f1_41', 25: 'f1_42', 26: 'f1_43', '27a': 'f1_44', '27b': 'f1_45',
         28: 'f1_46', 29: 'f1_47', '30home': 'f1_48', '30office': 'f1_49', 30: 'f1_50', 31: 'f1_51',
+        // Top section: name (f1_2, the SSN, is left for you), A-E
+        name: 'f1_1', A: 'f1_3', B: 'f1_4', C: 'f1_5', D: 'f1_6',
+        street: 'f1_7', city: 'f1_9', state: 'f1_10', zip: 'f1_11',
         cash: 'c1_1[0]',            // F: accounting method - cash
         participateYes: 'c1_2[0]',  // G: materially participated - yes
-        '44a': 'f2_12',             // Part IV: business miles
+        started: 'c1_3[0]',         // H: started or acquired this year
+        iYes: 'c1_4[0]', iNo: 'c1_4[1]',   // I: payments needing a 1099
+        jYes: 'c1_5[0]', jNo: 'c1_5[1]',   // J: filed them
+        atRisk: 'c1_7[0]',          // 32a: a loss, all investment at risk
+        // Part IV: date in service (month / day / year), miles, questions
+        '43m': 'f2_9', '43d': 'f2_10', '43y': 'f2_11',
+        '44a': 'f2_12', '44b': 'f2_13', '44c': 'f2_14',
+        '45yes': 'c2_5[0]', '45no': 'c2_5[1]', '46yes': 'c2_6[0]', '46no': 'c2_6[1]',
+        '47aYes': 'c2_7[0]', '47bYes': 'c2_8[0]',
         48: 'f2_33'                 // Part V total
       // Part V: nine rows of description (vN) + amount (vNamt), f2_15 to f2_32
       }, Object.fromEntries([...Array(9)].flatMap((_, i) => [[`v${i + 1}`, `f2_${15 + 2 * i}`], [`v${i + 1}amt`, `f2_${16 + 2 * i}`]])))
@@ -2678,7 +2763,8 @@ const IRS_FORMS = {
     'SE': {
       file: 'forms/f1040sse-2026.pdf',
       // Line 7 (the Social Security wage base) is printed on the form
-      boxes: { 2: 'f1_05', 3: 'f1_06', '4a': 'f1_07', '4c': 'f1_09', 6: 'f1_12', '8a': 'f1_14', '8d': 'f1_17',
+      // name: the person with self-employment income (f1_2, the SSN, is left for you)
+      boxes: { name: 'f1_1', 2: 'f1_05', 3: 'f1_06', '4a': 'f1_07', '4c': 'f1_09', 6: 'f1_12', '8a': 'f1_14', '8d': 'f1_17',
                9: 'f1_18', 10: 'f1_19', 11: 'f1_20', 12: 'f1_21', 13: 'f1_22' }
     },
     '8812': {
@@ -2822,6 +2908,133 @@ function scheduleCLines(a) {
   return L;
 }
 
+// -- Schedule C: the questions ---------------------------------------------
+// Everything on Schedule C that isn't an amount: the top section (name,
+// A-J), 32a on a loss, and Part IV (the car). From the Schedule C Details
+// card on the Taxes tab and Business Info's address. The SSN is never
+// stored, so its box stays blank.
+
+// Categories whose payments can need a 1099 (contractors, lawyers, rent)
+const SCHEDULE_C_1099_CATEGORIES = ['Contract Labor', 'Legal & Professional', 'Rent / Lease'];
+
+// Business Info's address split into Schedule C's boxes. The last line is
+// read as "City, ST 12345" (comma optional, ZIP+4 allowed); the lines above
+// it are the street. A line that is just the business name or the country
+// is skipped. Parts it can't find are left blank.
+function businessAddressParts() {
+  const lines = ((state.businessInfo || {}).address || '').split('\n').map(l => l.trim())
+    .filter(l => l && !/^cirrobound solutions( llc)?\.?$/i.test(l) && !/^(united states( of america)?|usa?)$/i.test(l));
+  const out = { street: '', city: '', state: '', zip: '' };
+  const m = lines.length ? lines[lines.length - 1].match(/^(.+?),?\s+([A-Za-z]{2})\.?\s+(\d{5}(?:-\d{4})?)$/) : null;
+  if (m) {
+    out.state = m[2].toUpperCase(); out.zip = m[3]; lines.pop();
+    // All on one line ("100 Main St, Town, SC 29000"): the part before the
+    // last comma is the street
+    const parts = m[1].split(',').map(p => p.trim()).filter(Boolean);
+    out.city = parts.pop() || '';
+    if (parts.length) lines.push(parts.join(', '));
+  }
+  out.street = lines.join(', ');
+  return out;
+}
+
+// Returns { text, checks } for the form (text already worded for the boxes)
+// plus what the card shows: i1099 (how line I was decided) and carMissing
+// (Part IV answers still blank; null when there are no business miles).
+function scheduleCDetails(a) {
+  const keep = state.scheduleC || {};
+  const yr = (((state.accountingYears || {})[a.year] || {}).scheduleC) || {};
+  const text = {}, checks = ['cash', 'participateYes'];
+  if (keep.name) text.name = keep.name;
+  if (keep.business) text.A = keep.business;
+  const code = String(keep.code || '').replace(/\D/g, '');
+  if (code.length === 6) text.B = code;
+  text.C = 'Cirrobound Solutions LLC';
+  const ein = String(keep.ein || '').replace(/\D/g, '');
+  if (ein.length === 9) text.D = ein;
+  const addr = businessAddressParts();
+  ['street', 'city', 'state', 'zip'].forEach(k => { if (addr[k]) text[k] = addr[k]; });
+  if (yr.started === 'yes') checks.push('started');
+
+  // Line I: your answer, or worked out - "Yes" when contract labor, legal
+  // or rent for the year reaches the 1099 limit. It's a category total, so
+  // when no single person was paid that much the answer is really "No".
+  const limit = Number(a.year) >= 2026 ? (CONTRACTOR_1099_LIMIT[a.year] || CONTRACTOR_1099_LIMIT[2026]) : 600;
+  const over = a.categories.filter(c => SCHEDULE_C_1099_CATEGORIES.includes(c.category) && c.spent >= limit).map(c => c.category);
+  const i = yr.i1099 || (over.length ? 'yes' : 'no');
+  checks.push(i === 'yes' ? 'iYes' : 'iNo');
+  if (i === 'yes') checks.push(yr.j1099 === 'no' ? 'jNo' : 'jYes');
+
+  // 32a: a loss from a one-owner business you paid for yourself is all at risk
+  if (scheduleCLines(a)[31] < 0) checks.push('atRisk');
+
+  // Part IV - only when the year has business miles (line 9 by the mile)
+  const car = a.categories.find(x => x.category === MILEAGE_CATEGORY);
+  const business = car ? Math.round(car.miles) : 0;
+  let carMissing = null;
+  if (business) {
+    carMissing = [];
+    const d = String(keep.vehicleDate || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (d) { text['43m'] = d[2]; text['43d'] = d[3]; text['43y'] = d[1]; }
+    else carMissing.push('the date the car was placed in service');
+    const total = Math.round(Number(yr.totalMiles) || 0);
+    const commuting = Math.round(Number(yr.commutingMiles) || 0);
+    // 44b and 44c need the year's total miles; 44c is what's left after
+    // business and commuting
+    if (total) {
+      text['44b'] = commuting.toLocaleString('en-US');
+      const other = total - business - commuting;
+      if (other >= 0) text['44c'] = other.toLocaleString('en-US');
+      else carMissing.push(`line 44c (all miles driven is less than the ${business.toLocaleString('en-US')} business miles plus commuting)`);
+    } else carMissing.push('all miles driven this year');
+    ['45', '46'].forEach((line, n) => {
+      const v = keep[n ? 'otherVehicle' : 'personalUse'];
+      if (v === 'yes' || v === 'no') checks.push(line + v);
+      else carMissing.push('line ' + line);
+    });
+    // 47a/47b: the app's trip log (date, miles, places for every trip) is
+    // written evidence of the miles
+    checks.push('47aYes', '47bYes');
+  }
+  return { text, checks, i1099: { answer: yr.i1099 || '', worked: i, over, limit }, carMissing };
+}
+
+// Schedule C Details card: save both halves, then redraw (the forms and
+// the hints read them)
+function saveScheduleCInputs() {
+  const year = document.getElementById('acctYear').value;
+  if (!state.accountingYears) state.accountingYears = {};
+  const y = state.accountingYears[year] = { ...(state.accountingYears[year] || {}) };
+  const keep = { ...(state.scheduleC || {}) };
+  const yr = { ...(y.scheduleC || {}) };
+  // Miles are whole numbers ('' when blank); everything else is text
+  const read = el => el.type === 'number'
+    ? (el.value === '' ? '' : Math.max(0, Math.round(parseFloat(el.value) || 0))) : el.value.trim();
+  document.querySelectorAll('[data-schc]').forEach(el => { keep[el.dataset.schc] = read(el); });
+  document.querySelectorAll('[data-schcyear]').forEach(el => { yr[el.dataset.schcyear] = read(el); });
+  state.scheduleC = keep;
+  y.scheduleC = yr;
+  save(); odAutoSave();
+  renderAccounting();
+}
+
+// The card's two notes: how line I was decided, and what Part IV still needs
+function renderScheduleCHints(a) {
+  const d = scheduleCDetails(a);
+  const r = d.i1099;
+  const names = list => list.length > 1 ? list.slice(0, -1).join(', ') + ' and ' + list[list.length - 1] : list[0];
+  document.getElementById('schc1099Hint').innerHTML = r.answer
+    ? `Line I: ${r.answer === 'yes' ? 'Yes' : 'No'} (your answer).`
+    : r.worked === 'yes'
+      ? `Line I worked out as <b>Yes</b>: ${escHtml(names(r.over))} reached the ${fmtMoney(r.limit)} 1099 limit for ${a.year}. That's the category's total &mdash; if no single person or company was paid ${fmtMoney(r.limit)} or more, choose No.`
+      : `Line I worked out as <b>No</b>: no contract labor, legal or rent total reaches the ${fmtMoney(r.limit)} 1099 limit for ${a.year}.`;
+  document.getElementById('schcCarHint').innerHTML = d.carMissing === null
+    ? `No business miles in ${a.year}, so Part IV stays blank.`
+    : d.carMissing.length
+      ? `Part IV still needs: ${escHtml(names(d.carMissing))}. Lines 47a and 47b are filled as Yes &mdash; the app's trip log is your written record.`
+      : 'Part IV is filled in. Lines 47a and 47b are Yes &mdash; the app\'s trip log is your written record.';
+}
+
 // -- Schedule SE: self-employment tax --------------------------------------
 // From Schedule C line 31. Line 8a (your own W-2 Social Security wages) is
 // left blank, as the app's self-employment tax assumes none.
@@ -2888,21 +3101,30 @@ function schedule8812Lines(a) {
   return { L, checks };
 }
 
+// The proprietor's name from Schedule C Details, for a form's name box
+// ({} when not entered, so the box stays blank)
+function proprietorName() {
+  const n = ((state.scheduleC || {}).name || '').trim();
+  return n ? { name: n } : {};
+}
+
 // The forms the app fills in, in the order they go behind Form 1040
 // (attachment sequence). applies: whether this year's return needs it;
 // fill: { text: line -> box text, checks: tick boxes to tick }.
 const FILLED_FORMS = [
   { key: 'C', name: 'Schedule C', applies: a => true,
-    fill: a => ({ text: formText(scheduleCLines(a), ['1', '3', '5', '7', '28', '29', '30', '31'], ['30home', '30office', '44a']),
-                  checks: ['cash', 'participateYes'] }) },
+    // Amounts from the books, then the top section and Part IV answers
+    fill: a => { const d = scheduleCDetails(a);
+      return { text: { ...formText(scheduleCLines(a), ['1', '3', '5', '7', '28', '29', '30', '31'], ['30home', '30office', '44a']), ...d.text },
+               checks: d.checks }; } },
   { key: 'SE', name: 'Schedule SE', applies: a => a.seTax > 0,
-    fill: a => ({ text: formText(scheduleSELines(a), ['2', '3', '4a', '4c', '6', '9', '10', '11', '12', '13']) }) },
+    fill: a => ({ text: { ...formText(scheduleSELines(a), ['2', '3', '4a', '4c', '6', '9', '10', '11', '12', '13']), ...proprietorName() } }) },
   { key: '8812', name: 'Schedule 8812', applies: a => !!(a.taxes && a.taxes.ctcFull),
     fill: a => { const r = schedule8812Lines(a);
       return { text: formText(r.L, ['1', '3', '5', '8', '9', '10', '11', '12', '13', '14', '16a', '16b', '17', '18a', '20', '25', '26', '27'], ['4', '6', '16bkids']),
                checks: r.checks }; } },
   { key: '8829', name: 'Form 8829', applies: a => a.homeOffice.used === 'actual' && a.homeOffice.deduction > 0,
-    fill: a => ({ text: form8829Text(form8829Lines(a.homeOffice)) }) }
+    fill: a => ({ text: { ...form8829Text(form8829Lines(a.homeOffice)), ...proprietorName() } }) }
 ];
 
 // Writes the text and ticks into a blank IRS form; returns the pdf-lib
@@ -3420,6 +3642,10 @@ function renderTaxes(a) {
   fillAll('home', state.homeOffice || {});
   fillAll('homeyear', homeYearInputs(a.year));
   fillAll('itemized', inputs.itemized || {});
+  // Schedule C Details: the business's answers, then this year's
+  fillAll('schc', state.scheduleC || {});
+  fillAll('schcyear', inputs.scheduleC || {});
+  renderScheduleCHints(a);
   lockHomeBillsFromDocs(a.year);
   renderHomeDocs(a.year);
 
@@ -3776,7 +4002,8 @@ function formsCard(a) {
   return groups.map(g => `<div class="form-group">${g.head}</div>${g.items.map(item).join('')}`).join('')
     + (filled.length ? `<div class="forms-download">
         <button class="btn btn-primary" onclick="downloadAllForms()">Download all filled forms (PDF)</button>
-        <p>${list(filled)} filled in from these figures, in one PDF &mdash; add your names and Social Security numbers.
+        <p>${list(filled)} filled in from these figures, in one PDF &mdash; add your Social Security numbers${!(state.scheduleC || {}).name ? ', and your names (or enter yours under Schedule C Details)'
+          : filled.includes('Schedule 8812') ? ', and the names on Schedule 8812 (both of you on a joint return)' : ''}.
         ${notYet.length ? `${list(notYet)} ${notYet.length > 1 ? 'are' : 'is'} filled in once the ${a.year} version is posted and added to the app.` : ''}
         ${personal.length ? `${list(personal)} only ${personal.length > 1 ? 'ask' : 'asks'} for your children's details, so ${personal.length > 1 ? 'they are' : 'it is'} left for you.` : ''}
         Check them against your tax software or accountant before you file.</p>
